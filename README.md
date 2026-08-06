@@ -16,7 +16,8 @@ the beginning balance or editing a recurring transaction re-drives the whole she
 
 ## Using it
 
-1. On **Cash Flow**, type your beginning balance in `E5` and a start date (a Monday) in `E6`.
+1. On **Cash Flow**, type your beginning balance in `E5` and a start date in `E6`. Weeks run
+   **Friday through Thursday**, so use a Friday — the sheet warns you beside `E6` if you don't.
    `E7` is the cushion below which a week is flagged `TIGHT`.
 2. On **Recurring**, edit any row or add one in the first empty row. Set Description, Type
    (Income/Expense), Amount as a positive number, Frequency, Next Due Date, and Active = Yes.

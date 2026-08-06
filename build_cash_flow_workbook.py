@@ -138,7 +138,10 @@ SEED = [
     ("Expense", "Progressive Insurance",         143.37, "Monthly",        dt.date(2026, 8, 31), "None",        "Insurance"),
 ]
 
-START_DATE = dt.date(2026, 8, 3)   # Monday of the week the screenshots were taken
+# Weeks run Friday -> Thursday, so the $790 Friday paycheck lands on day 1 of
+# the week rather than in the middle of it. This is the Friday of the week the
+# screenshots were taken.
+START_DATE = dt.date(2026, 7, 31)
 BEGIN_BAL = 1250.00                # example starting balance - user overwrites
 CUSHION = 200.00
 
@@ -161,7 +164,8 @@ steps = [
     ("HOW TO USE IT", None),
     ("1.  Set your starting point",
      "On the 'Cash Flow' tab, type your Beginning Balance in E5 and your start date in E6 "
-     "(use a Monday). Everything below it flows from those two cells."),
+     "(use a Friday). Everything below it flows from those two cells. Weeks run "
+     "Friday through Thursday, so your Friday paycheck arrives on day one."),
     ("2.  Check your recurring transactions",
      "The 'Recurring' tab is already loaded with the bills and paychecks from your app. "
      "Edit any row, or type a new one into the first empty row - it appears on the cash "
@@ -408,16 +412,21 @@ put(cf, "B2", "Beginning balance -> every scheduled transaction -> what you actu
 put(cf, "B4", "STEP 1 — SET YOUR STARTING POINT (type in the yellow cells)", F_H2)
 inputs = [
     (5, "Beginning Balance  (cash on hand at the start date)", BEGIN_BAL, MONEY),
-    (6, "Cash Flow Start Date  (use a Monday)", START_DATE, DATE_L),
+    (6, "Cash Flow Start Date  (use a Friday — weeks run Fri to Thu)", START_DATE, DATE_L),
     (7, "Minimum Cash Cushion  (warn me below this)", CUSHION, MONEY),
 ]
 for row, label, val, fmt in inputs:
     put(cf, f"B{row}", label, F_BOLD)
     put(cf, f"E{row}", val, F_INPUT, fmt=fmt, fill=FILL_IN, border=BOX, align="center")
+put(cf, "G6", '=IF($E$6="","",IF(WEEKDAY($E$6,2)=5,"",'
+              '"! That is a "&TEXT($E$6,"dddd")&". Weeks run Friday to Thursday — '
+              'use the Friday on or before the date you want to start."))',
+    Font(name=FONT, size=9, bold=True, color="C00000"))
 put(cf, "B8", "Today", F_BODY)
 put(cf, "E8", "=TODAY()", F_BODY, fmt=DATE_L, align="center", border=BOX)
 put(cf, "B9", f"This sheet projects {N_WEEKS} weeks from the start date. "
-              f"Week 1 begins on the start date.", F_NOTE)
+              f"Week 1 begins on the start date and each week runs Friday "
+              f"through Thursday.", F_NOTE)
 put(cf, "B10",
     "Blue = you type it.  Black/green = formulas, leave them alone.  A yellow 'Amount Paid' "
     "cell means that transaction is due or overdue and still unrecorded.", F_NOTE)
