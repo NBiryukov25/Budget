@@ -134,14 +134,14 @@ SEED = [
     ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
     ("Expense", "Google One",                     4.99,  "Monthly",        dt.date(2026, 9, 7),  "None",        "Subscriptions"),
     ("Expense", "Upstart (loan)",                500.00, "Monthly",        dt.date(2026, 9, 7),  "None",        "Debt"),
-    ("Expense", "Central Maine Power Co.",       163.50, "Monthly",        dt.date(2026, 8, 10), "None",        "Utilities"),
+    ("Expense", "Central Maine Power Co.",       163.50, "Monthly",        dt.date(2026, 9, 10), "None",        "Utilities"),
     ("Expense", "Apple: iCloud",                   2.99, "Monthly",        dt.date(2026, 8, 13), "None",        "Subscriptions"),
     ("Expense", "Patrick Rombalski (rent)",      350.00, "Twice a Month",  dt.date(2026, 8, 14), "Move Before", "Housing"),
     ("Expense", "Spectrum",                      171.10, "Monthly",        dt.date(2026, 8, 16), "None",        "Utilities"),
     ("Expense", "Maine Revenue Services",         45.00, "Monthly",        dt.date(2026, 8, 16), "None",        "Taxes"),
     ("Expense", "Metal Copy",                     16.99, "Monthly",        dt.date(2026, 8, 18), "None",        "Subscriptions"),
     ("Expense", "Microsoft",                      13.70, "Monthly",        dt.date(2026, 8, 25), "None",        "Subscriptions"),
-    ("Expense", "Central Maine Power: Property",  43.87, "Monthly",        dt.date(2026, 8, 25), "None",        "Utilities"),
+    ("Expense", "Central Maine Power: Payment Plan", 43.87, "Monthly",     dt.date(2026, 8, 25), "None",        "Utilities"),
     ("Expense", "Maine Revenue Services (2)",    150.00, "Monthly",        dt.date(2026, 8, 30), "None",        "Taxes"),
     ("Expense", "Progressive Insurance",         143.37, "Monthly",        dt.date(2026, 8, 31), "None",        "Insurance"),
 ]
@@ -289,6 +289,11 @@ notes = [
     "Confirmed with the user on Aug 7, 2026.",
     "Progressive Insurance ($143.37) was cut off at the bottom of the third screenshot, so "
     "its due date is set to Aug 31, 2026. Correct it on the Recurring tab if that is wrong.",
+    "Central Maine Power: the $43.87 payment plan covers usage through August, so the "
+    "$163.50 regular bill does not start until Sep 10, 2026. OPEN QUESTION: the $43.87 plan "
+    "is still set to repeat every month from Aug 25. If the plan ends once the $163.50 "
+    "billing resumes, set its Active to No or give it an end, or the sheet will charge you "
+    "both from September onward.",
     "Patrick Rombalski is 'Twice a Month' with Weekend Rule = Move Before, which is why the "
     "August payment lands on Fri Aug 14 rather than Sat Aug 15, matching your app.",
     "The Beginning Balance of $1,250.00 and the weekly expense examples in Week 1 are "
