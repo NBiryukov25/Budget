@@ -77,6 +77,8 @@ F_LINK = Font(name=FONT, size=10, color=GREEN)
 F_BOLD = Font(name=FONT, size=10, bold=True, color=BLACK)
 F_WEEK = Font(name=FONT, size=11, bold=True, color="FFFFFF")
 F_NOTE = Font(name=FONT, size=9, italic=True, color="595959")
+F_IN = Font(name=FONT, size=10, bold=True, color="006100")    # money in
+F_OUT = Font(name=FONT, size=10, color="9C0006")              # money out
 
 FILL_HDR = PatternFill("solid", fgColor="1F3864")
 FILL_WEEK = PatternFill("solid", fgColor="2E75B6")
@@ -86,6 +88,8 @@ FILL_TOT = PatternFill("solid", fgColor="E2EFDA")
 FILL_BAND = PatternFill("solid", fgColor="F2F2F2")
 FILL_WARN = PatternFill("solid", fgColor="FCE4D6")
 FILL_EMPTY = PatternFill("solid", fgColor="FFF9D6")   # softer "row is free" tint
+FILL_IN_HDR = PatternFill("solid", fgColor="C6E0B4")  # MONEY IN header
+FILL_OUT_HDR = PatternFill("solid", fgColor="F8CBAD")  # MONEY OUT header
 
 THIN = Side(style="thin", color="BFBFBF")
 BOX = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
@@ -205,6 +209,10 @@ r += 1
 legend = [
     ("Blue text", "You type it. A number or date you enter by hand.", F_INPUT, None),
     ("Yellow fill", "A cell waiting for you to fill it in.", F_BODY, FILL_IN),
+    ("MONEY IN", "Green column. Deposits only — paychecks and anything else coming in.",
+     F_IN, FILL_IN_HDR),
+    ("MONEY OUT", "Orange column. Payments only — bills and spending going out.",
+     F_OUT, FILL_OUT_HDR),
     ("Black text", "A formula that does the arithmetic — running balances, week "
                    "totals, the Summary. Leave these alone.", F_BODY, None),
     ("Green text", "A formula that pulls a transaction in from the Recurring tab. "
@@ -453,10 +461,9 @@ sch.freeze_panes = f"A{SCH_FIRST}"
 cf = wb.create_sheet("Cash Flow", 2)
 cf.sheet_view.showGridLines = False
 cf_widths = {"A": 3, "B": 32, "C": 13, "D": 11, "E": 14, "F": 14, "G": 14,
-             "H": 11, "I": 15, "J": 12, "K": 34}
+             "H": 14, "I": 15, "J": 12, "K": 34}
 for col, wdt in cf_widths.items():
     cf.column_dimensions[col].width = wdt
-cf.column_dimensions["H"].hidden = True
 
 put(cf, "B1", "WEEKLY CASH FLOW SURVIVAL WORKSHEET", F_TITLE)
 put(cf, "B2", "Beginning balance -> every scheduled transaction -> what you actually paid "
@@ -481,8 +488,9 @@ put(cf, "B9", f"This sheet projects {N_WEEKS} weeks from the start date. "
               f"Week 1 begins on the start date and each week runs Friday "
               f"through Thursday.", F_NOTE)
 put(cf, "B10",
-    "A yellow 'Amount Paid' cell means that transaction is due or overdue and still "
-    "unrecorded.  The green transaction cells are safe to type straight over when a "
+    "Money coming in and money going out sit in separate columns and are never added "
+    "together.  A yellow 'Amount Paid' cell means that transaction is due or overdue and "
+    "still unrecorded.  The green transaction cells are safe to type straight over when a "
     "date or amount is wrong — the balances keep working.  See the Instructions tab.",
     F_NOTE)
 
@@ -516,11 +524,14 @@ for w in range(1, N_WEEKS + 1):
     cf.row_dimensions[h].height = 22
 
     # ---- column headers
+    # Money In and Money Out are separate columns on purpose: a paycheck and a
+    # bill must never sit in the same column looking like the same thing.
     heads = [("B", "Recurring Transaction"), ("C", "Scheduled Date"), ("D", "Type"),
-             ("E", "Scheduled Amount"), ("F", "Amount Paid"), ("G", "Amount Applied"),
-             ("H", "Signed"), ("I", "Running Balance"), ("J", "Status")]
+             ("E", "Scheduled Amount"), ("F", "Amount Paid"), ("G", "MONEY IN"),
+             ("H", "MONEY OUT"), ("I", "Running Balance"), ("J", "Status")]
     for col, label in heads:
-        put(cf, f"{col}{cr}", label, F_H2, fill=FILL_SUB, align="center", border=BOX, wrap=True)
+        fill = {"G": FILL_IN_HDR, "H": FILL_OUT_HDR}.get(col, FILL_SUB)
+        put(cf, f"{col}{cr}", label, F_H2, fill=fill, align="center", border=BOX, wrap=True)
     cf.row_dimensions[cr].height = 26
 
     # ---- recurring slots
@@ -533,9 +544,10 @@ for w in range(1, N_WEEKS + 1):
         cf[f"D{r}"] = f'=IF($B{r}="","",INDEX(Schedule!$D${SCH_FIRST}:$D${SCH_LAST},{mt}))'
         cf[f"E{r}"] = f'=IF($B{r}="","",INDEX(Schedule!$E${SCH_FIRST}:$E${SCH_LAST},{mt}))'
         cf[f"F{r}"] = None
-        cf[f"G{r}"] = f'=IF($B{r}="","",IF($F{r}<>"",$F{r},$E{r}))'
-        cf[f"H{r}"] = f'=IF($B{r}="",0,IF($D{r}="Income",$G{r},-$G{r}))'
-        cf[f"I{r}"] = f'=IF($B{r}="","",$I${h}+SUM($H${fs}:$H{r}))'
+        applied = f'IF($F{r}<>"",$F{r},$E{r})'
+        cf[f"G{r}"] = f'=IF($B{r}="","",IF($D{r}="Income",{applied},""))'
+        cf[f"H{r}"] = f'=IF($B{r}="","",IF($D{r}="Income","",{applied}))'
+        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}+SUM($G${fs}:$G{r})-SUM($H${fs}:$H{r}))')
         cf[f"J{r}"] = (f'=IF($B{r}="","",IF($F{r}<>"","PAID",'
                        f'IF($C{r}<TODAY(),"PAST DUE",'
                        f'IF($C{r}<=TODAY()+7,"DUE","Upcoming"))))')
@@ -544,9 +556,10 @@ for w in range(1, N_WEEKS + 1):
             cf[f"{col}{r}"].border = BOX
             cf[f"{col}{r}"].font = F_LINK if col in "BCD" else F_BODY
         cf[f"F{r}"].font = F_INPUT
-        for col in "EFGI":
+        for col in "EFGH":
             cf[f"{col}{r}"].number_format = MONEY
-        cf[f"H{r}"].number_format = MONEY
+        cf[f"G{r}"].font = F_IN
+        cf[f"H{r}"].font = F_OUT
         cf[f"I{r}"].number_format = MONEY_B
         for col in "CDJ":
             cf[f"{col}{r}"].alignment = Alignment(horizontal="center")
@@ -568,17 +581,18 @@ for w in range(1, N_WEEKS + 1):
         if w == 1 and n < len(VAR_SEED):
             cf[f"B{r}"], cf[f"E{r}"] = VAR_SEED[n]
         cf[f"D{r}"] = f'=IF($B{r}="","","Expense")'
-        cf[f"G{r}"] = f'=IF($B{r}="","",N($E{r}))'
-        cf[f"H{r}"] = f'=IF($B{r}="",0,-N($E{r}))'
-        cf[f"I{r}"] = f'=IF($B{r}="","",$I${h}+SUM($H${fs}:$H{r}))'
+        cf[f"G{r}"] = None
+        cf[f"H{r}"] = f'=IF($B{r}="","",N($E{r}))'
+        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}+SUM($G${fs}:$G{r})-SUM($H${fs}:$H{r}))')
 
         for col in "BCDEFGHIJ":
             cf[f"{col}{r}"].border = BOX
             cf[f"{col}{r}"].font = F_BODY
         for col in "BE":
             cf[f"{col}{r}"].font = F_INPUT
-        for col in "EGHI":
+        for col in "EH":
             cf[f"{col}{r}"].number_format = MONEY
+        cf[f"H{r}"].font = F_OUT
         cf[f"I{r}"].number_format = MONEY_B
         cf[f"D{r}"].alignment = Alignment(horizontal="center")
 
@@ -589,18 +603,20 @@ for w in range(1, N_WEEKS + 1):
     put(cf, f"B{tot}", f"WEEK {w} TOTALS", F_BOLD, fill=FILL_TOT, border=BOX)
     put(cf, f"C{tot}", "", F_BODY, fill=FILL_TOT, border=BOX)
     put(cf, f"D{tot}", "", F_BODY, fill=FILL_TOT, border=BOX)
-    put(cf, f"E{tot}", f"=SUM($E${fs}:$E${lv})", F_BOLD, fmt=MONEY, fill=FILL_TOT, border=BOX)
-    put(cf, f"F{tot}", f"=SUM($F${fs}:$F${ls})", F_BOLD, fmt=MONEY, fill=FILL_TOT, border=BOX)
+    # Scheduled Amount and Amount Paid are deliberately NOT totalled: those two
+    # columns hold income and expenses side by side, so a single sum of them is
+    # a meaningless number that reads as though the paychecks were bills.
+    put(cf, f"E{tot}", "", F_BODY, fill=FILL_TOT, border=BOX)
+    put(cf, f"F{tot}", "", F_BODY, fill=FILL_TOT, border=BOX)
     put(cf, f"G{tot}", f"=SUM($G${fs}:$G${lv})", F_BOLD, fmt=MONEY, fill=FILL_TOT, border=BOX)
     put(cf, f"H{tot}", f"=SUM($H${fs}:$H${lv})", F_BOLD, fmt=MONEY, fill=FILL_TOT, border=BOX)
-    put(cf, f"I{tot}", f"=$I${h}+SUM($H${fs}:$H${lv})", F_BOLD, fmt=MONEY_B,
+    put(cf, f"I{tot}", f"=$I${h}+$G${tot}-$H${tot}", F_BOLD, fmt=MONEY_B,
         fill=FILL_TOT, border=BOX, align="center")
     put(cf, f"J{tot}", f'=IF($I${tot}<0,"SHORTFALL",IF($I${tot}<$E$7,"TIGHT","OK"))',
         F_BOLD, fill=FILL_TOT, border=BOX, align="center")
     put(cf, f"K{tot}",
-        f'="Income "&TEXT(SUMIF($D${fs}:$D${lv},"Income",$G${fs}:$G${lv}),"$#,##0.00")'
-        f'&"   less expenses "&TEXT(SUMIF($D${fs}:$D${lv},"Expense",$G${fs}:$G${lv}),"$#,##0.00")'
-        f'&"   =  net "&TEXT($H${tot},"$#,##0.00")', F_NOTE)
+        f'="In "&TEXT($G${tot},"$#,##0.00")&"   less out "&TEXT($H${tot},"$#,##0.00")'
+        f'&"   =  net "&TEXT($G${tot}-$H${tot},"$#,##0.00;-$#,##0.00")', F_NOTE)
     cf[f"B{tot}"].border = Border(left=THIN, right=THIN, bottom=THIN,
                                   top=Side(style="medium", color="1F3864"))
     bal_ranges.append(f"I{tot}")
@@ -698,11 +714,13 @@ for w in range(1, N_WEEKS + 1):
     put(sm, f"C{r}", f"={CUR}!$E$6+{7 * (w - 1)}",
         F_LINK, fmt=DATE_L, align="center", border=BOX, fill=band)
     put(sm, f"D{r}", f"={CUR}!$I${h}", F_LINK, fmt=MONEY_B, border=BOX, fill=band)
-    put(sm, f"E{r}", f'=SUMIF({CUR}!$D${fs}:$D${ls},"Income",{CUR}!$G${fs}:$G${ls})',
+    # Money In / Money Out are already separate columns on the Cash Flow tab,
+    # so these are plain sums of the right column rather than SUMIFs on Type.
+    put(sm, f"E{r}", f"=SUM({CUR}!$G${fs}:$G${lv})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
-    put(sm, f"F{r}", f'=SUMIF({CUR}!$D${fs}:$D${ls},"Expense",{CUR}!$G${fs}:$G${ls})',
+    put(sm, f"F{r}", f"=SUM({CUR}!$H${fs}:$H${ls})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
-    put(sm, f"G{r}", f'=SUMIF({CUR}!$D${fv}:$D${lv},"Expense",{CUR}!$G${fv}:$G${lv})',
+    put(sm, f"G{r}", f"=SUM({CUR}!$H${fv}:$H${lv})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
     put(sm, f"H{r}", f"=$E{r}-$F{r}-$G{r}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)
     put(sm, f"I{r}", f"={CUR}!$I${tot}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)

@@ -22,6 +22,8 @@ the beginning balance or editing a recurring transaction re-drives the whole she
 2. On **Recurring**, edit any row or add one in the first empty row. Set Description, Type
    (Income/Expense), Amount as a positive number, Frequency, Next Due Date, and Active = Yes.
    It appears in the cash flow on its own.
+   Money coming in and money going out sit in separate **MONEY IN** / **MONEY OUT** columns
+   and are never added together, so a paycheck can't be mistaken for a bill.
 3. Back on **Cash Flow**, record the real amount in the **Amount Paid** column as each due
    date arrives or passes. The cell turns yellow when something is due and still blank. Until
    you fill it in, the sheet projects the scheduled amount.
