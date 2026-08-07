@@ -117,13 +117,17 @@ def put(ws, ref, value, font=F_BODY, fmt=None, fill=None, align=None,
 
 # ------------------------------------------------------- recurring seed data
 # Transcribed from the user's three "Recurring" app screenshots (Aug 2026).
+# Every Next Due Date is the next occurrence falling on or after START_DATE.
+# Anything already received or paid before the sheet opens is rolled forward to
+# its following occurrence, so the projection never re-counts money that has
+# already moved. The Aug 7 Compunnel paycheck is already in the $71.17 balance.
 # type, description, amount, frequency, next due, weekend rule, category
 SEED = [
-    ("Income",  "Bruno's Restaurant (paycheck)", 90.00,  "Weekly",         dt.date(2026, 8, 5),  "None",        "Wages"),
-    ("Income",  "Compunnel Software (paycheck)", 790.00, "Weekly",         dt.date(2026, 8, 7),  "None",        "Wages"),
-    ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 8, 4),  "None",        "Subscriptions"),
-    ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
-    ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
+    ("Income",  "Bruno's Restaurant (paycheck)", 90.00,  "Weekly",         dt.date(2026, 8, 12), "None",        "Wages"),
+    ("Income",  "Compunnel Software (paycheck)", 790.00, "Weekly",         dt.date(2026, 8, 14), "None",        "Wages"),
+    ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 9, 4),  "None",        "Subscriptions"),
+    ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
+    ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
     ("Expense", "Google One",                     4.99,  "Monthly",        dt.date(2026, 8, 7),  "None",        "Subscriptions"),
     ("Expense", "Upstart (loan)",                500.00, "Monthly",        dt.date(2026, 8, 7),  "None",        "Debt"),
     ("Expense", "Central Maine Power Co.",       163.50, "Monthly",        dt.date(2026, 8, 10), "None",        "Utilities"),
@@ -234,6 +238,12 @@ overrides = [
      "column is yours already and always wins over the scheduled figure."),
     ("To get the formula back",
      "Undo, or copy the same cell from the row above or below and let Excel adjust it."),
+    ("Already paid or already received",
+     "Do NOT zero out the row. Go to the Recurring tab and move that transaction's Next "
+     "Due Date forward to its following occurrence — that is a blue cell you are meant to "
+     "edit, with no formula anywhere near it. The occurrence disappears from the cash flow "
+     "and every later one still lands correctly. Your beginning balance already contains "
+     "the money, so counting it again would overstate the whole 13 weeks."),
 ]
 for name, desc in overrides:
     put(ins, f"B{r}", name, F_BOLD)
@@ -264,6 +274,11 @@ notes = [
     "app's Recurring / Upcoming list (August 2026). Nothing was invented.",
     "Amounts are entered as positive numbers. The Type column (Income or Expense) decides "
     "the sign, so a $90 paycheck is Type = Income, amount 90.",
+    "The sheet opens on Fri Aug 7, 2026 with $71.17 already in hand. The Aug 7 Compunnel "
+    "paycheck had already landed by then, so its Next Due Date is Aug 14 — the first one "
+    "still to come. Bruno's, Apple: Claude, OpenAI and Obsidian were rolled forward for the "
+    "same reason. Google One ($4.99) and Upstart ($500) are still shown as due on Aug 7; if "
+    "those already came out of the account, roll them forward to Sep 7 too.",
     "Progressive Insurance ($143.37) was cut off at the bottom of the third screenshot, so "
     "its due date is set to Aug 31, 2026. Correct it on the Recurring tab if that is wrong.",
     "Patrick Rombalski is 'Twice a Month' with Weekend Rule = Move Before, which is why the "
