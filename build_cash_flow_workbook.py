@@ -128,8 +128,8 @@ SEED = [
     ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 9, 4),  "None",        "Subscriptions"),
     ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
     ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
-    ("Expense", "Google One",                     4.99,  "Monthly",        dt.date(2026, 8, 7),  "None",        "Subscriptions"),
-    ("Expense", "Upstart (loan)",                500.00, "Monthly",        dt.date(2026, 8, 7),  "None",        "Debt"),
+    ("Expense", "Google One",                     4.99,  "Monthly",        dt.date(2026, 9, 7),  "None",        "Subscriptions"),
+    ("Expense", "Upstart (loan)",                500.00, "Monthly",        dt.date(2026, 9, 7),  "None",        "Debt"),
     ("Expense", "Central Maine Power Co.",       163.50, "Monthly",        dt.date(2026, 8, 10), "None",        "Utilities"),
     ("Expense", "Apple: iCloud",                   2.99, "Monthly",        dt.date(2026, 8, 13), "None",        "Subscriptions"),
     ("Expense", "Patrick Rombalski (rent)",      350.00, "Twice a Month",  dt.date(2026, 8, 14), "Move Before", "Housing"),
@@ -274,11 +274,11 @@ notes = [
     "app's Recurring / Upcoming list (August 2026). Nothing was invented.",
     "Amounts are entered as positive numbers. The Type column (Income or Expense) decides "
     "the sign, so a $90 paycheck is Type = Income, amount 90.",
-    "The sheet opens on Fri Aug 7, 2026 with $71.17 already in hand. The Aug 7 Compunnel "
-    "paycheck had already landed by then, so its Next Due Date is Aug 14 — the first one "
-    "still to come. Bruno's, Apple: Claude, OpenAI and Obsidian were rolled forward for the "
-    "same reason. Google One ($4.99) and Upstart ($500) are still shown as due on Aug 7; if "
-    "those already came out of the account, roll them forward to Sep 7 too.",
+    "The sheet opens on Fri Aug 7, 2026 with $71.17 already in hand. Everything that had "
+    "already moved by that morning was rolled forward to its next occurrence, so the "
+    "projection never counts the same money twice: the Compunnel paycheck (now Aug 14), "
+    "Upstart and Google One (now Sep 7), and Bruno's, Apple: Claude, OpenAI and Obsidian. "
+    "Confirmed with the user on Aug 7, 2026.",
     "Progressive Insurance ($143.37) was cut off at the bottom of the third screenshot, so "
     "its due date is set to Aug 31, 2026. Correct it on the Recurring tab if that is wrong.",
     "Patrick Rombalski is 'Twice a Month' with Weekend Rule = Move Before, which is why the "
