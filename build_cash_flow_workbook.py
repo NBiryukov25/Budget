@@ -141,11 +141,13 @@ SEED = [
 # Weeks run Friday -> Thursday, so the $790 Friday paycheck lands on day 1 of
 # the week rather than in the middle of it. This is the Friday of the week the
 # screenshots were taken.
-START_DATE = dt.date(2026, 7, 31)
-BEGIN_BAL = 1250.00                # example starting balance - user overwrites
+START_DATE = dt.date(2026, 8, 7)
+BEGIN_BAL = 71.17                  # the user's actual balance at the start date
 CUSHION = 200.00
 
-VAR_SEED = [("Groceries", 120.00), ("Gas / fuel", 60.00), ("Eating out", 35.00)]
+# No seeded variable expenses: this is a live sheet against a real balance, so
+# placeholder spending would distort every ending balance below it.
+VAR_SEED = []
 
 
 wb = Workbook()
@@ -199,12 +201,44 @@ r += 1
 legend = [
     ("Blue text", "You type it. A number or date you enter by hand.", F_INPUT, None),
     ("Yellow fill", "A cell waiting for you to fill it in.", F_BODY, FILL_IN),
-    ("Black text", "A formula. Do not overwrite it or the model stops updating.", F_BODY, None),
-    ("Green text", "A formula that pulls from another tab.", F_LINK, None),
+    ("Black text", "A formula that does the arithmetic — running balances, week "
+                   "totals, the Summary. Leave these alone.", F_BODY, None),
+    ("Green text", "A formula that pulls a transaction in from the Recurring tab. "
+                   "You CAN type straight over these — see below.", F_LINK, None),
 ]
 for name, desc, fnt, fill in legend:
     put(ins, f"B{r}", name, fnt, fill=fill, border=BOX)
     put(ins, f"C{r}", desc, F_BODY, wrap=True)
+    r += 1
+
+r += 1
+put(ins, f"B{r}", "WHEN A FORMULA IS IN YOUR WAY", F_H2)
+r += 1
+overrides = [
+    ("Type over it",
+     "The green cells in the week blocks — Description, Scheduled Date, Type, Scheduled "
+     "Amount — are safe to overwrite. Type a real date or a different amount straight into "
+     "the cell. The running balance, the week totals and the Summary all keep working, "
+     "because they read the cell rather than the formula behind it."),
+    ("What you give up",
+     "That one row stops following the Recurring tab. Edit the transaction later and this "
+     "row will not move with it. Everything else on the sheet is unaffected."),
+    ("To skip a bill this week",
+     "Clear the Description cell. The row empties out and drops from the week's totals, "
+     "leaving the rest of the week intact."),
+    ("To add a one-off",
+     "Type a description, date, Income or Expense, and an amount into any blank row in a "
+     "week block. Nothing needs to exist on the Recurring tab first."),
+    ("To pay part of a bill",
+     "Leave the scheduled row alone and put what you actually paid in Amount Paid. That "
+     "column is yours already and always wins over the scheduled figure."),
+    ("To get the formula back",
+     "Undo, or copy the same cell from the row above or below and let Excel adjust it."),
+]
+for name, desc in overrides:
+    put(ins, f"B{r}", name, F_BOLD)
+    put(ins, f"C{r}", desc, F_BODY, wrap=True)
+    ins.row_dimensions[r].height = 42
     r += 1
 
 r += 1
@@ -307,8 +341,12 @@ dv_freq = DataValidation(
 dv_wknd = DataValidation(type="list", formula1='"None,Move Before,Move After"', allow_blank=True)
 dv_act = DataValidation(type="list", formula1='"Yes,No"', allow_blank=True)
 for dv, col in ((dv_type, "C"), (dv_freq, "E"), (dv_wknd, "G"), (dv_act, "H")):
-    dv.error = "Pick one of the listed values."
-    dv.errorTitle = "Not a valid entry"
+    # 'warning', not the default 'stop': the dropdown is a convenience, and it
+    # must never be able to block you from typing what you need.
+    dv.errorStyle = "warning"
+    dv.error = ("The Schedule tab only recognises the listed values, so anything else "
+                "will not generate dates. Choose Yes to enter it anyway.")
+    dv.errorTitle = "Not one of the listed values"
     rec.add_data_validation(dv)
     dv.add(f"{col}{REC_FIRST}:{col}{REC_LAST}")
 
@@ -428,8 +466,10 @@ put(cf, "B9", f"This sheet projects {N_WEEKS} weeks from the start date. "
               f"Week 1 begins on the start date and each week runs Friday "
               f"through Thursday.", F_NOTE)
 put(cf, "B10",
-    "Blue = you type it.  Black/green = formulas, leave them alone.  A yellow 'Amount Paid' "
-    "cell means that transaction is due or overdue and still unrecorded.", F_NOTE)
+    "A yellow 'Amount Paid' cell means that transaction is due or overdue and still "
+    "unrecorded.  The green transaction cells are safe to type straight over when a "
+    "date or amount is wrong — the balances keep working.  See the Instructions tab.",
+    F_NOTE)
 
 paid_ranges, bal_ranges, status_ranges, var_ranges = [], [], [], []
 
