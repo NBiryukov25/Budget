@@ -241,9 +241,19 @@ overrides = [
     ("To add a one-off",
      "Type a description, date, Income or Expense, and an amount into any blank row in a "
      "week block. Nothing needs to exist on the Recurring tab first."),
+    ("One week's amount is different",
+     "This is what the 'Amount Paid / Received' column is for, and it needs no formula "
+     "touched at all. Working extra shifts and expecting $150 from Bruno's instead of $90? "
+     "Type 150 into that row's Amount Paid / Received cell. MONEY IN, the running balance "
+     "and the Summary all follow it, that row stays linked to the Recurring tab, and every "
+     "other week keeps the usual $90. It works the same for a bill that comes in higher or "
+     "lower than scheduled."),
+    ("ADJUSTED vs PAID",
+     "A figure typed against a date still in the future reads ADJUSTED — you have revised "
+     "what you expect, not recorded money that moved. Once the date arrives it reads PAID."),
     ("To pay part of a bill",
-     "Leave the scheduled row alone and put what you actually paid in Amount Paid. That "
-     "column is yours already and always wins over the scheduled figure."),
+     "Same column. Put what you actually paid in Amount Paid / Received; it always wins "
+     "over the scheduled figure."),
     ("To get the formula back",
      "Undo, or copy the same cell from the row above or below and let Excel adjust it."),
     ("Already paid or already received",
@@ -544,7 +554,7 @@ for w in range(1, N_WEEKS + 1):
     # Money In and Money Out are separate columns on purpose: a paycheck and a
     # bill must never sit in the same column looking like the same thing.
     heads = [("B", "Recurring Transaction"), ("C", "Scheduled Date"), ("D", "Type"),
-             ("E", "Scheduled Amount"), ("F", "Amount Paid"), ("G", "MONEY IN"),
+             ("E", "Scheduled Amount"), ("F", "Amount Paid / Received"), ("G", "MONEY IN"),
              ("H", "MONEY OUT"), ("I", "Running Balance"), ("J", "Status")]
     for col, label in heads:
         fill = {"G": FILL_IN_HDR, "H": FILL_OUT_HDR}.get(col, FILL_SUB)
@@ -565,7 +575,9 @@ for w in range(1, N_WEEKS + 1):
         cf[f"G{r}"] = f'=IF($B{r}="","",IF($D{r}="Income",{applied},""))'
         cf[f"H{r}"] = f'=IF($B{r}="","",IF($D{r}="Income","",{applied}))'
         cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}+SUM($G${fs}:$G{r})-SUM($H${fs}:$H{r}))')
-        cf[f"J{r}"] = (f'=IF($B{r}="","",IF($F{r}<>"","PAID",'
+        # A figure typed against a future date is a revised expectation, not a
+        # payment that has happened — say ADJUSTED so the two are never confused.
+        cf[f"J{r}"] = (f'=IF($B{r}="","",IF($F{r}<>"",IF($C{r}>TODAY(),"ADJUSTED","PAID"),'
                        f'IF($C{r}<TODAY(),"PAST DUE",'
                        f'IF($C{r}<=TODAY()+7,"DUE","Upcoming"))))')
 
