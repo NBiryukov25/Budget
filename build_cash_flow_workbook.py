@@ -129,9 +129,9 @@ def put(ws, ref, value, font=F_BODY, fmt=None, fill=None, align=None,
 SEED = [
     ("Income",  "Bruno's Restaurant (paycheck)", 90.00,  "Weekly",         dt.date(2026, 8, 12), "None",        "Wages"),
     ("Income",  "Compunnel Software (paycheck)", 790.00, "Weekly",         dt.date(2026, 8, 14), "None",        "Wages"),
-    ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 9, 4),  "None",        "Subscriptions"),
-    ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
-    ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 9, 5),  "None",        "Subscriptions"),
+    ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 8, 4),  "None",        "Subscriptions"),
+    ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
+    ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
     ("Expense", "Google One",                     4.99,  "Monthly",        dt.date(2026, 9, 7),  "None",        "Subscriptions"),
     ("Expense", "Upstart (loan)",                500.00, "Monthly",        dt.date(2026, 9, 7),  "None",        "Debt"),
     ("Expense", "Central Maine Power Co.",       163.50, "Monthly",        dt.date(2026, 9, 10), "None",        "Utilities"),
@@ -282,11 +282,15 @@ notes = [
     "app's Recurring / Upcoming list (August 2026). Nothing was invented.",
     "Amounts are entered as positive numbers. The Type column (Income or Expense) decides "
     "the sign, so a $90 paycheck is Type = Income, amount 90.",
-    "The sheet opens on Fri Aug 7, 2026 with $71.17 already in hand. Everything that had "
-    "already moved by that morning was rolled forward to its next occurrence, so the "
-    "projection never counts the same money twice: the Compunnel paycheck (now Aug 14), "
-    "Upstart and Google One (now Sep 7), and Bruno's, Apple: Claude, OpenAI and Obsidian. "
-    "Confirmed with the user on Aug 7, 2026.",
+    "Next Due Date means the next occurrence you have NOT paid yet. If that date is "
+    "already behind you the transaction still appears, in Week 1, marked PAST DUE — an "
+    "unpaid bill never drops off this sheet just because its date has passed. Only roll a "
+    "date forward once the money has actually moved.",
+    "The sheet opens on Fri Aug 7, 2026 with $71.17 already in hand. Confirmed as already "
+    "settled and therefore rolled forward: the Compunnel paycheck (now Aug 14), Upstart "
+    "and Google One (now Sep 7), Bruno's (Aug 12), and the $163.50 Central Maine Power "
+    "bill (now Sep 10, covered by the payment plan through August). Apple: Claude, OpenAI "
+    "and Obsidian keep their Aug 4 and Aug 5 dates because they are still unpaid.",
     "Progressive Insurance ($143.37) was cut off at the bottom of the third screenshot, so "
     "its due date is set to Aug 31, 2026. Correct it on the Recurring tab if that is wrong.",
     "Central Maine Power: the $43.87 payment plan covers usage through August, so the "
@@ -352,8 +356,11 @@ for i in range(1, N_ITEMS + 1):
 REC_LAST = REC_FIRST + N_ITEMS - 1
 
 note_row = REC_LAST + 2
-put(rec, f"B{note_row}", "Next Due Date = the next time it happens on or after your cash flow "
-                         "start date. Set Active to No to park a transaction without deleting it.",
+put(rec, f"B{note_row}", "Next Due Date = the next occurrence you have NOT paid yet. A date "
+                         "already in the past is fine — it appears in Week 1 marked PAST DUE and "
+                         "stays there until you deal with it. Only move a date forward once the "
+                         "money has actually moved. Set Active to No to park a transaction "
+                         "without deleting it.",
     F_NOTE, wrap=True)
 put(rec, f"B{note_row + 1}",
     "Weekend Rule shifts a due date that lands on a Saturday or Sunday: Move Before = the "
@@ -440,9 +447,14 @@ for i in range(1, N_ITEMS + 1):
             f'IF(Recurring!$G${R}="Move After",'
             f'IF(WEEKDAY($F{r},2)=6,$F{r}+2,IF(WEEKDAY($F{r},2)=7,$F{r}+1,$F{r})),'
             f'$F{r})))')
-        sch[f"H{r}"] = (f'=IF($G{r}="",0,IF(AND($G{r}>={CUR}!$E$6,'
+        # The Next Due Date is the next occurrence that has NOT been paid, which
+        # may already be overdue. So occurrence 1 is allowed to fall before the
+        # start date and is carried into Week 1; later occurrences are not, or a
+        # single rule would spray its whole back-history across the sheet.
+        low = f"{CUR}!$E$6-90" if k == 1 else f"{CUR}!$E$6"
+        sch[f"H{r}"] = (f'=IF($G{r}="",0,IF(AND($G{r}>={low},'
                         f'$G{r}<{CUR}!$E$6+{N_WEEKS * 7}),1,0))')
-        sch[f"I{r}"] = f'=IF($H{r}=1,INT(($G{r}-{CUR}!$E$6)/7)+1,"")'
+        sch[f"I{r}"] = f'=IF($H{r}=1,MAX(1,INT(($G{r}-{CUR}!$E$6)/7)+1),"")'
         sch[f"J{r}"] = f'=IF($H{r}=1,$G{r}*10000+ROW(),"")'
         sch[f"K{r}"] = (f'=IF($H{r}=1,$I{r}*1000+COUNTIFS($I${SCH_FIRST}:$I${SCH_LAST},$I{r},'
                         f'$J${SCH_FIRST}:$J${SCH_LAST},"<"&$J{r})+1,"")')
