@@ -488,9 +488,13 @@ sch.freeze_panes = f"A{SCH_FIRST}"
 cf = wb.create_sheet("Cash Flow", 2)
 cf.sheet_view.showGridLines = False
 cf_widths = {"A": 3, "B": 32, "C": 13, "D": 11, "E": 14, "F": 14, "G": 14,
-             "H": 14, "I": 15, "J": 12, "K": 34}
+             "H": 14, "I": 15, "J": 12, "K": 52, "L": 10, "M": 8}
 for col, wdt in cf_widths.items():
     cf.column_dimensions[col].width = wdt
+# L and M order the block by date so the running balance is truthful even when a
+# variable expense is typed at the bottom but happened mid-week.
+cf.column_dimensions["L"].hidden = True
+cf.column_dimensions["M"].hidden = True
 
 put(cf, "B1", "WEEKLY CASH FLOW SURVIVAL WORKSHEET", F_TITLE)
 put(cf, "B2", "Beginning balance -> every scheduled transaction -> what you actually paid "
@@ -574,7 +578,12 @@ for w in range(1, N_WEEKS + 1):
         applied = f'IF($F{r}<>"",$F{r},$E{r})'
         cf[f"G{r}"] = f'=IF($B{r}="","",IF($D{r}="Income",{applied},""))'
         cf[f"H{r}"] = f'=IF($B{r}="","",IF($D{r}="Income","",{applied}))'
-        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}+SUM($G${fs}:$G{r})-SUM($H${fs}:$H{r}))')
+        cf[f"L{r}"] = f'=IF($B{r}="","",$C{r})'
+        cf[f"M{r}"] = (f'=IF($L{r}="","",COUNTIFS($L${fs}:$L${lv},"<"&$L{r})'
+                       f'+COUNTIFS($L${fs}:$L{r},$L{r}))')
+        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}'
+                       f'+SUMIFS($G${fs}:$G${lv},$M${fs}:$M${lv},"<="&$M{r})'
+                       f'-SUMIFS($H${fs}:$H${lv},$M${fs}:$M${lv},"<="&$M{r}))')
         # A figure typed against a future date is a revised expectation, not a
         # payment that has happened — say ADJUSTED so the two are never confused.
         cf[f"J{r}"] = (f'=IF($B{r}="","",IF($F{r}<>"",IF($C{r}>TODAY(),"ADJUSTED","PAID"),'
@@ -602,8 +611,8 @@ for w in range(1, N_WEEKS + 1):
 
     # ---- weekly variable expenses
     put(cf, f"B{b['var_hdr']}",
-        "WEEKLY VARIABLE EXPENSES — type what you spend this week (groceries, gas, "
-        "eating out, anything)", F_H2, fill=FILL_SUB, border=BOX)
+        "WEEKLY VARIABLE EXPENSES — type a description, THE DATE, and the amount "
+        "(groceries, gas, eating out, anything)", F_H2, fill=FILL_SUB, border=BOX)
     for col in "CDEFGHIJ":
         cf[f"{col}{b['var_hdr']}"].fill = FILL_SUB
         cf[f"{col}{b['var_hdr']}"].border = BOX
@@ -615,13 +624,21 @@ for w in range(1, N_WEEKS + 1):
         cf[f"D{r}"] = f'=IF($B{r}="","","Expense")'
         cf[f"G{r}"] = None
         cf[f"H{r}"] = f'=IF($B{r}="","",N($E{r}))'
-        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}+SUM($G${fs}:$G{r})-SUM($H${fs}:$H{r}))')
+        # No date typed? Treat it as end of week so it still counts, just last.
+        cf[f"L{r}"] = (f'=IF($B{r}="","",IF($C{r}="",$E$6+{7 * (w - 1) + 6},$C{r}))')
+        cf[f"M{r}"] = (f'=IF($L{r}="","",COUNTIFS($L${fs}:$L${lv},"<"&$L{r})'
+                       f'+COUNTIFS($L${fs}:$L{r},$L{r}))')
+        cf[f"I{r}"] = (f'=IF($B{r}="","",$I${h}'
+                       f'+SUMIFS($G${fs}:$G${lv},$M${fs}:$M${lv},"<="&$M{r})'
+                       f'-SUMIFS($H${fs}:$H${lv},$M${fs}:$M${lv},"<="&$M{r}))')
 
         for col in "BCDEFGHIJ":
             cf[f"{col}{r}"].border = BOX
             cf[f"{col}{r}"].font = F_BODY
-        for col in "BE":
+        for col in "BCE":
             cf[f"{col}{r}"].font = F_INPUT
+        cf[f"C{r}"].number_format = DATE_F
+        cf[f"C{r}"].alignment = Alignment(horizontal="center")
         for col in "EH":
             cf[f"{col}{r}"].number_format = MONEY
         cf[f"H{r}"].font = F_OUT
@@ -647,8 +664,12 @@ for w in range(1, N_WEEKS + 1):
     put(cf, f"J{tot}", f'=IF($I${tot}<0,"SHORTFALL",IF($I${tot}<$E$7,"TIGHT","OK"))',
         F_BOLD, fill=FILL_TOT, border=BOX, align="center")
     put(cf, f"K{tot}",
-        f'="In "&TEXT($G${tot},"$#,##0.00")&"   less out "&TEXT($H${tot},"$#,##0.00")'
-        f'&"   =  net "&TEXT($G${tot}-$H${tot},"$#,##0.00;-$#,##0.00")', F_NOTE)
+        f'=IF(COUNT($I${fs}:$I${lv})=0,"",'
+        f'"Lowest point this week: "&TEXT(MIN($I${fs}:$I${lv}),"$#,##0.00;-$#,##0.00")'
+        f'&" on "&TEXT(INDEX($C${fs}:$C${lv},MATCH(MIN($I${fs}:$I${lv}),$I${fs}:$I${lv},0)),'
+        f'"ddd mmm d")&"     (in "&TEXT($G${tot},"$#,##0.00")&", out "'
+        f'&TEXT($H${tot},"$#,##0.00")&")")',
+        Font(name=FONT, size=9, bold=True, color="1F3864"))
     cf[f"B{tot}"].border = Border(left=THIN, right=THIN, bottom=THIN,
                                   top=Side(style="medium", color="1F3864"))
     bal_ranges.append(f"I{tot}")
