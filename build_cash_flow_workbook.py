@@ -499,7 +499,7 @@ put(cf, "B10",
     "date or amount is wrong — the balances keep working.  See the Instructions tab.",
     F_NOTE)
 
-paid_ranges, bal_ranges, status_ranges, var_ranges = [], [], [], []
+paid_ranges, bal_ranges, status_ranges, var_ranges, slot_ranges = [], [], [], [], []
 
 for w in range(1, N_WEEKS + 1):
     b = block_rows(w)
@@ -557,8 +557,10 @@ for w in range(1, N_WEEKS + 1):
                        f'IF($C{r}<TODAY(),"PAST DUE",'
                        f'IF($C{r}<=TODAY()+7,"DUE","Upcoming"))))')
 
+        # No static border here. Unused slots would otherwise render as a grid of
+        # empty boxes and make a quiet week look broken; a conditional rule below
+        # draws the border only on rows that actually hold a transaction.
         for col in "BCDEFGHIJ":
-            cf[f"{col}{r}"].border = BOX
             cf[f"{col}{r}"].font = F_LINK if col in "BCD" else F_BODY
         cf[f"F{r}"].font = F_INPUT
         for col in "EFGH":
@@ -572,6 +574,7 @@ for w in range(1, N_WEEKS + 1):
 
     paid_ranges.append(f"F{fs}:F{ls}")
     status_ranges.append(f"J{fs}:J{ls}")
+    slot_ranges.append(f"B{fs}:J{ls}")
 
     # ---- weekly variable expenses
     put(cf, f"B{b['var_hdr']}",
@@ -628,6 +631,11 @@ for w in range(1, N_WEEKS + 1):
     status_ranges.append(f"J{tot}")
 
 # conditional formatting across all week blocks
+# Border only the transaction rows that are actually populated.
+cf.conditional_formatting.add(
+    " ".join(slot_ranges),
+    FormulaRule(formula=[f'$B{CF_FIRST_BLOCK + 2}<>""'], border=BOX, stopIfTrue=False))
+
 paid_all = " ".join(paid_ranges)
 cf.conditional_formatting.add(
     paid_all,
