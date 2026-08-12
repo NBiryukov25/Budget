@@ -30,7 +30,7 @@ N_ITEMS = 30           # recurring-transaction slots
 N_OCC = 16             # occurrences generated per recurring item
 N_WEEKS = 13           # weeks shown on the cash flow
 SLOTS = 10             # recurring rows shown per week
-VAR_ROWS = 6           # weekly variable-expense rows per week
+VAR_ROWS = 10          # weekly variable-expense rows per week
 
 REC_HDR = 4                        # header row on Recurring
 REC_FIRST = REC_HDR + 1            # first data row -> item i lives on REC_FIRST+i-1
