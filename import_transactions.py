@@ -162,7 +162,7 @@ def main():
     for w in range(1, N_WEEKS + 1):
         b = block(w, var_rows)
         free[w] = [r for r in range(b["first_var"], b["last_var"] + 1)
-                   if cf[f"B{r}"].value is None or str(cf[f"B{r}"].value).startswith("=")]
+                   if cf[f"B{r}"].value is None]
     for item in to_write:
         w = item["week"]
         if free.get(w):

@@ -101,6 +101,8 @@ DATE_F = 'ddd mm/dd'
 DATE_L = 'ddd mmm d, yyyy'
 
 CUR = "'Cash Flow'"
+PLOG = "'Paid Log'"
+LOG_HDR, LOG_FIRST, LOG_LAST = 4, 5, 304
 
 
 def put(ws, ref, value, font=F_BODY, fmt=None, fill=None, align=None,
@@ -128,7 +130,8 @@ def put(ws, ref, value, font=F_BODY, fmt=None, fill=None, align=None,
 # type, description, amount, frequency, next due, weekend rule, category
 SEED = [
     ("Income",  "Bruno's Restaurant (paycheck)", 90.00,  "Weekly",         dt.date(2026, 8, 12), "None",        "Wages"),
-    ("Income",  "Compunnel Software (paycheck)", 790.00, "Weekly",         dt.date(2026, 8, 14), "None",        "Wages"),
+    # Varies by about $45 a week; a survival sheet plans on the low end.
+    ("Income",  "Compunnel Software (paycheck)", 745.00, "Weekly",         dt.date(2026, 8, 14), "None",        "Wages"),
     ("Expense", "Apple: Claude",                 21.10,  "Monthly",        dt.date(2026, 8, 4),  "None",        "Subscriptions"),
     ("Expense", "OpenAI",                        20.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
     ("Expense", "Obsidian",                      10.00,  "Monthly",        dt.date(2026, 8, 5),  "None",        "Subscriptions"),
@@ -152,6 +155,10 @@ SEED = [
 START_DATE = dt.date(2026, 8, 7)
 BEGIN_BAL = 71.17                  # the user's actual balance at the start date
 CUSHION = 200.00
+# What a normal week of groceries, gas and incidentals actually costs. Weeks with
+# nothing logged yet are topped up to this, so the forecast is not silently
+# assuming zero spending for every week you have not reached.
+ALLOWANCE = 400.00
 
 # No seeded variable expenses: this is a live sheet against a real balance, so
 # placeholder spending would distort every ending balance below it.
@@ -329,7 +336,7 @@ INS_LAST = r - 1
 rec = wb.create_sheet("Recurring")
 rec.sheet_view.showGridLines = False
 rec_widths = {"A": 6, "B": 30, "C": 11, "D": 12, "E": 16, "F": 15,
-              "G": 14, "H": 8, "I": 15, "J": 26}
+              "G": 14, "H": 8, "I": 15, "J": 20, "K": 46}
 for col, wdt in rec_widths.items():
     rec.column_dimensions[col].width = wdt
 
@@ -340,7 +347,7 @@ put(rec, "B2", "Edit any row, or add a new one in the first empty row. Blue cell
 rec_cols = [
     ("A", "ID"), ("B", "Description"), ("C", "Type"), ("D", "Amount"),
     ("E", "Frequency"), ("F", "Next Due Date"), ("G", "Weekend Rule"),
-    ("H", "Active"), ("I", "Category"), ("J", "Notes"),
+    ("H", "Active"), ("I", "Category"), ("J", "Notes"), ("K", "Check"),
 ]
 for col, label in rec_cols:
     put(rec, f"{col}{REC_HDR}", label, F_H1, fill=FILL_HDR, align="center",
@@ -362,6 +369,17 @@ for i in range(1, N_ITEMS + 1):
     put(rec, f"H{row}", "Yes" if seed else None, F_INPUT, align="center", border=BOX, fill=band)
     put(rec, f"I{row}", cat or None, F_INPUT, border=BOX, fill=band)
     put(rec, f"J{row}", None, F_INPUT, border=BOX, fill=band)
+    # Typing 821 instead of 8/21/2026 gives Excel the number 821, which is a date
+    # in 1902 — far outside the projection, so the row vanishes from the cash flow
+    # without a word. This says so out loud.
+    put(rec, f"K{row}",
+        f'=IF($B{row}="","",'
+        f'IF($F{row}="","! No date — this will not appear on the cash flow",'
+        f'IF(NOT(ISNUMBER($F{row})),"! Not a date — type it as 8/21/2026",'
+        f'IF($F{row}<{CUR}!$E$6-90,"! "&TEXT($F{row},"mmm d, yyyy")&" is too far back to show — did you mean this year?",'
+        f'IF($F{row}>{CUR}!$E$6+730,"! "&TEXT($F{row},"mmm d, yyyy")&" is years away — check the date",'
+        f'IF($F{row}>{CUR}!$E$6+{N_WEEKS * 7 - 1},"beyond the "&{N_WEEKS}&"-week window","")))))) ',
+        Font(name=FONT, size=9, bold=True, color="C00000"), border=BOX, fill=band)
 
 REC_LAST = REC_FIRST + N_ITEMS - 1
 
@@ -397,13 +415,54 @@ for dv, col in ((dv_type, "C"), (dv_freq, "E"), (dv_wknd, "G"), (dv_act, "H")):
 
 # empty rows are the ones to fill in next
 rec.conditional_formatting.add(
-    f"B{REC_FIRST}:J{REC_LAST}",
+    f"B{REC_FIRST}:K{REC_LAST}",
     FormulaRule(formula=[f'$B{REC_FIRST}=""'], fill=FILL_EMPTY, stopIfTrue=False))
 rec.conditional_formatting.add(
-    f"A{REC_FIRST}:J{REC_LAST}",
+    f"A{REC_FIRST}:K{REC_LAST}",
     FormulaRule(formula=[f'AND($B{REC_FIRST}<>"",$H{REC_FIRST}="No")'],
                 font=Font(name=FONT, size=10, italic=True, color="A6A6A6")))
 rec.freeze_panes = f"B{REC_FIRST}"
+
+
+# ================================================================== PAID LOG
+plog = wb.create_sheet("Paid Log")
+plog.sheet_view.showGridLines = False
+for col, wdt in {"A": 3, "B": 16, "C": 34, "D": 15, "E": 34}.items():
+    plog.column_dimensions[col].width = wdt
+
+put(plog, "B1", "PAID LOG", F_TITLE)
+put(plog, "B2", "What a scheduled bill or paycheck actually came to.", F_SUB)
+for i, line in enumerate([
+    "Typing into Amount Paid on the Cash Flow tab writes to a fixed cell, and which "
+    "transaction sits in that cell depends on the order of the week. Change a due date and "
+    "the rows reshuffle while the typed figure stays put — it ends up against the wrong bill.",
+    "An entry here is tied to the transaction instead, so it stays correct however the weeks "
+    "reorder. Match the Description exactly as it reads on the Cash Flow tab and use that "
+    "row's scheduled date.",
+    "The importer writes here too. An amount typed straight into Amount Paid still wins over "
+    "this log, so clear that cell if you want the log to take over.",
+]):
+    put(plog, f"B{4 + i}", line, F_NOTE, wrap=True)
+    plog.merge_cells(f"B{4 + i}:E{4 + i}")
+    plog.row_dimensions[4 + i].height = 26
+
+LOG_HDR2 = 8
+for col, label in (("B", "Scheduled Date"), ("C", "Description"),
+                   ("D", "Actual Amount"), ("E", "Note")):
+    put(plog, f"{col}{LOG_HDR2}", label, F_H1, fill=FILL_HDR, align="center", border=BOX)
+for r in range(LOG_HDR2 + 1, LOG_HDR2 + 301):
+    band = FILL_BAND if (r - LOG_HDR2) % 2 == 0 else None
+    for col in "BCDE":
+        put(plog, f"{col}{r}", None, F_INPUT, border=BOX, fill=band)
+    plog[f"B{r}"].number_format = DATE_L
+    plog[f"B{r}"].alignment = Alignment(horizontal="center")
+    plog[f"D{r}"].number_format = MONEY
+plog.freeze_panes = f"B{LOG_HDR2 + 1}"
+
+LOG_FIRST, LOG_LAST = LOG_HDR2 + 1, LOG_HDR2 + 300
+LOG_D = f"{PLOG}!$B${LOG_FIRST}:$B${LOG_LAST}"
+LOG_N = f"{PLOG}!$C${LOG_FIRST}:$C${LOG_LAST}"
+LOG_A = f"{PLOG}!$D${LOG_FIRST}:$D${LOG_LAST}"
 
 
 # ================================================================== SCHEDULE
@@ -513,12 +572,15 @@ put(cf, "G6", '=IF($E$6="","",IF(WEEKDAY($E$6,2)=5,"",'
               '"! That is a "&TEXT($E$6,"dddd")&". Weeks run Friday to Thursday — '
               'use the Friday on or before the date you want to start."))',
     Font(name=FONT, size=9, bold=True, color="C00000"))
-put(cf, "B8", "Today", F_BODY)
-put(cf, "E8", "=TODAY()", F_BODY, fmt=DATE_L, align="center", border=BOX)
-put(cf, "B9", f"This sheet projects {N_WEEKS} weeks from the start date. "
-              f"Week 1 begins on the start date and each week runs Friday "
-              f"through Thursday.", F_NOTE)
-put(cf, "B10",
+put(cf, "B8", "Expected everyday spending, per week", F_BOLD)
+put(cf, "E8", ALLOWANCE, F_INPUT, fmt=MONEY, fill=FILL_IN, border=BOX, align="center")
+put(cf, "G8", "Groceries, gas, coffee — what a normal week costs you. Each week is topped up "
+              "to this until you log more than it.", F_NOTE)
+put(cf, "B9", "Today", F_BODY)
+put(cf, "E9", "=TODAY()", F_BODY, fmt=DATE_L, align="center", border=BOX)
+put(cf, "B10", f"This sheet projects {N_WEEKS} weeks from the start date. "
+               f"Week 1 begins on the start date.", F_NOTE)
+put(cf, "B11",
     "Money coming in and money going out sit in separate columns and are never added "
     "together.  A yellow 'Amount Paid' cell means that transaction is due or overdue and "
     "still unrecorded.  The green transaction cells are safe to type straight over when a "
@@ -575,7 +637,11 @@ for w in range(1, N_WEEKS + 1):
         cf[f"D{r}"] = f'=IF($B{r}="","",INDEX(Schedule!$D${SCH_FIRST}:$D${SCH_LAST},{mt}))'
         cf[f"E{r}"] = f'=IF($B{r}="","",INDEX(Schedule!$E${SCH_FIRST}:$E${SCH_LAST},{mt}))'
         cf[f"F{r}"] = None
-        applied = f'IF($F{r}<>"",$F{r},$E{r})'
+        # Precedence: a figure typed into Amount Paid, then a Paid Log entry
+        # matched on description and scheduled date, then the scheduled amount.
+        hits = f'COUNTIFS({LOG_D},$C{r},{LOG_N},$B{r})'
+        applied = (f'IF($F{r}<>"",$F{r},IF({hits}>0,'
+                   f'SUMIFS({LOG_A},{LOG_D},$C{r},{LOG_N},$B{r}),$E{r}))')
         cf[f"G{r}"] = f'=IF($B{r}="","",IF($D{r}="Income",{applied},""))'
         cf[f"H{r}"] = f'=IF($B{r}="","",IF($D{r}="Income","",{applied}))'
         cf[f"L{r}"] = f'=IF($B{r}="","",$C{r})'
@@ -586,7 +652,8 @@ for w in range(1, N_WEEKS + 1):
                        f'-SUMIFS($H${fs}:$H${lv},$M${fs}:$M${lv},"<="&$M{r}))')
         # A figure typed against a future date is a revised expectation, not a
         # payment that has happened — say ADJUSTED so the two are never confused.
-        cf[f"J{r}"] = (f'=IF($B{r}="","",IF($F{r}<>"",IF($C{r}>TODAY(),"ADJUSTED","PAID"),'
+        cf[f"J{r}"] = (f'=IF($B{r}="","",IF(OR($F{r}<>"",{hits}>0),'
+                       f'IF($C{r}>TODAY(),"ADJUSTED","PAID"),'
                        f'IF($C{r}<TODAY(),"PAST DUE",'
                        f'IF($C{r}<=TODAY()+7,"DUE","Upcoming"))))')
 
@@ -645,8 +712,17 @@ for w in range(1, N_WEEKS + 1):
         cf[f"I{r}"].number_format = MONEY_B
         cf[f"D{r}"].alignment = Alignment(horizontal="center")
 
-    var_ranges.append(f"B{fv}:B{lv}")
-    var_ranges.append(f"E{fv}:E{lv}")
+    # The last variable row is not yours to type in: it tops the week up to the
+    # expected everyday spending so an untouched future week is not silently
+    # forecast at zero. Log more than the allowance and it falls to nothing.
+    put(cf, f"B{lv}", f'="Everyday spending still expected this week"', F_NOTE)
+    put(cf, f"C{lv}", f"=$E$6+{7 * (w - 1) + 6}", F_NOTE, fmt=DATE_F, align="center")
+    put(cf, f"E{lv}", f"=MAX(0,$E$8-SUM($E${fv}:$E${lv - 1}))", F_NOTE, fmt=MONEY)
+    for col in "BCE":
+        cf[f"{col}{lv}"].fill = FILL_BAND
+
+    var_ranges.append(f"B{fv}:B{lv - 1}")
+    var_ranges.append(f"E{fv}:E{lv - 1}")
 
     # ---- totals
     put(cf, f"B{tot}", f"WEEK {w} TOTALS", F_BOLD, fill=FILL_TOT, border=BOX)
@@ -715,8 +791,8 @@ cf.freeze_panes = "B12"
 # =================================================================== SUMMARY
 sm = wb.create_sheet("Summary", 3)
 sm.sheet_view.showGridLines = False
-for col, wdt in {"A": 3, "B": 7, "C": 19, "D": 15, "E": 13, "F": 16, "G": 15,
-                 "H": 13, "I": 15, "J": 15, "K": 13, "L": 12, "M": 11}.items():
+for col, wdt in {"A": 3, "B": 7, "C": 19, "D": 13, "E": 15, "F": 16, "G": 17,
+                 "H": 16, "I": 16, "J": 15, "K": 12, "L": 12, "M": 11}.items():
     sm.column_dimensions[col].width = wdt
 
 put(sm, "B1", "13-WEEK SURVIVAL SUMMARY", F_TITLE)
@@ -739,11 +815,11 @@ kpis = [
      f'=IF(MIN($M${SM_FIRST}:$M${SM_LAST})=999,"None — you never go below zero in {N_WEEKS} weeks",'
      f'"Week "&MIN($M${SM_FIRST}:$M${SM_LAST})&"  ("&TEXT(INDEX($C${SM_FIRST}:$C${SM_LAST},'
      f'MATCH(MIN($M${SM_FIRST}:$M${SM_LAST}),$B${SM_FIRST}:$B${SM_LAST},0)),"mmm d, yyyy")&")")', None),
-    ("B7", "Total income projected", f"=SUM($E${SM_FIRST}:$E${SM_LAST})", MONEY),
-    ("B8", "Total expenses projected",
-     f"=SUM($F${SM_FIRST}:$F${SM_LAST})+SUM($G${SM_FIRST}:$G${SM_LAST})", MONEY),
-    ("B9", f"Net change over {N_WEEKS} weeks",
-     f"=SUM($H${SM_FIRST}:$H${SM_LAST})", MONEY_B),
+    ("B7", "Total money in", f"=SUM($D${SM_FIRST}:$D${SM_LAST})", MONEY),
+    ("B8", "Total money out",
+     f"=SUM($E${SM_FIRST}:$E${SM_LAST})+SUM($F${SM_FIRST}:$F${SM_LAST})", MONEY),
+    ("B9", f"Surplus over {N_WEEKS} weeks",
+     f"=SUM($G${SM_FIRST}:$G${SM_LAST})", MONEY_B),
     ("B10", "Ending balance", f"=$I${SM_LAST}", MONEY_B),
 ]
 for ref, label, formula, fmt in kpis:
@@ -755,13 +831,19 @@ for ref, label, formula, fmt in kpis:
         sm.merge_cells(f"E{row}:L{row}")
         sm[f"E{row}"].alignment = Alignment(horizontal="left", vertical="center")
 
-sm_cols = [("B", "Week"), ("C", "Week Beginning"), ("D", "Starting Balance"),
-           ("E", "Money In"), ("F", "Recurring Bills"), ("G", "Everyday Spending"),
-           ("H", "Net Change"), ("I", "Left at Week End"), ("J", "Lowest In Week"),
+# The week on its own merits comes first - did it pay for itself? - then the
+# balance rolling in and out of it. Surplus and Carried Forward are deliberately
+# separate columns: a week can close on $1,500 of carried money while losing
+# $200 of its own.
+sm_cols = [("B", "Week"), ("C", "Week Beginning"), ("D", "Money In"),
+           ("E", "Recurring Bills"), ("F", "Everyday Spending"),
+           ("G", "Weekly Surplus"), ("H", "Carried Forward"),
+           ("I", "Left at Week End"), ("J", "Lowest In Week"),
            ("K", "On"), ("L", "Status"), ("M", "shortfall key")]
 for col, label in sm_cols:
-    fill = {"E": FILL_IN_HDR, "F": FILL_OUT_HDR, "G": FILL_OUT_HDR}.get(col, FILL_HDR)
-    font = F_H2 if col in "EFG" else F_H1
+    fill = {"D": FILL_IN_HDR, "E": FILL_OUT_HDR, "F": FILL_OUT_HDR,
+            "G": FILL_TOT}.get(col, FILL_HDR)
+    font = F_H2 if col in "DEFG" else F_H1
     put(sm, f"{col}{SM_HDR}", label, font, fill=fill, align="center", border=BOX, wrap=True)
 sm.row_dimensions[SM_HDR].height = 32
 sm.column_dimensions["M"].hidden = True
@@ -775,16 +857,18 @@ for w in range(1, N_WEEKS + 1):
     put(sm, f"B{r}", w, F_BODY, align="center", border=BOX, fill=band)
     put(sm, f"C{r}", f"={CUR}!$E$6+{7 * (w - 1)}",
         F_LINK, fmt=DATE_L, align="center", border=BOX, fill=band)
-    put(sm, f"D{r}", f"={CUR}!$I${h}", F_LINK, fmt=MONEY_B, border=BOX, fill=band)
     # Money In / Money Out are already separate columns on the Cash Flow tab,
     # so these are plain sums of the right column rather than SUMIFs on Type.
-    put(sm, f"E{r}", f"=SUM({CUR}!$G${fs}:$G${lv})",
+    put(sm, f"D{r}", f"=SUM({CUR}!$G${fs}:$G${lv})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
-    put(sm, f"F{r}", f"=SUM({CUR}!$H${fs}:$H${ls})",
+    put(sm, f"E{r}", f"=SUM({CUR}!$H${fs}:$H${ls})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
-    put(sm, f"G{r}", f"=SUM({CUR}!$H${fv}:$H${lv})",
+    put(sm, f"F{r}", f"=SUM({CUR}!$H${fv}:$H${lv})",
         F_LINK, fmt=MONEY, border=BOX, fill=band)
-    put(sm, f"H{r}", f"=$E{r}-$F{r}-$G{r}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)
+    # Did this week pay for itself? Nothing carried in, nothing carried out.
+    put(sm, f"G{r}", f"=$D{r}-$E{r}-$F{r}", F_BOLD, fmt=MONEY_B, border=BOX,
+        fill=FILL_TOT)
+    put(sm, f"H{r}", f"={CUR}!$I${h}", F_LINK, fmt=MONEY_B, border=BOX, fill=band)
     put(sm, f"I{r}", f"={CUR}!$I${tot}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)
     # The lowest the balance gets at any point inside the week, and the day it
     # happens. A week can end healthy having gone under midweek, so Status is
@@ -801,11 +885,11 @@ for w in range(1, N_WEEKS + 1):
 
 TOT_R = SM_LAST + 1
 put(sm, f"B{TOT_R}", "TOTAL", F_BOLD, fill=FILL_TOT, border=BOX, align="center")
-put(sm, f"C{TOT_R}", "opening →", F_NOTE, fill=FILL_TOT, border=BOX, align="right")
-put(sm, f"D{TOT_R}", f"=$D${SM_FIRST}", F_BOLD, fmt=MONEY_B, fill=FILL_TOT, border=BOX)
-for col in "EFGH":
+put(sm, f"C{TOT_R}", "", F_NOTE, fill=FILL_TOT, border=BOX)
+for col in "DEFG":
     put(sm, f"{col}{TOT_R}", f"=SUM(${col}${SM_FIRST}:${col}${SM_LAST})", F_BOLD,
-        fmt=MONEY if col != "H" else MONEY_B, fill=FILL_TOT, border=BOX)
+        fmt=MONEY if col in "DEF" else MONEY_B, fill=FILL_TOT, border=BOX)
+put(sm, f"H{TOT_R}", f"=$H${SM_FIRST}", F_BOLD, fmt=MONEY_B, fill=FILL_TOT, border=BOX)
 put(sm, f"I{TOT_R}", f"=$I${SM_LAST}", F_BOLD, fmt=MONEY_B, fill=FILL_TOT, border=BOX)
 put(sm, f"J{TOT_R}", f"=MIN($J${SM_FIRST}:$J${SM_LAST})", F_BOLD, fmt=MONEY_B,
     fill=FILL_TOT, border=BOX)
@@ -827,11 +911,13 @@ sm.conditional_formatting.add(
 
 note = TOT_R + 2
 put(sm, f"B{note}",
-    "Money In and the two spending columns come straight from each week block on the Cash "
-    "Flow tab: Recurring Bills from the scheduled rows, Everyday Spending from what you or "
-    "the importer put in the variable rows. Left at Week End is where the week closes. "
-    "Lowest In Week is the worst moment inside it — a week can close healthy having gone "
-    "under midweek, so Status is judged on that, not on the closing figure.",
+    "Weekly Surplus is the week standing on its own — money in less both kinds of spending, "
+    "with nothing carried in. Carried Forward is what last week left you. Add the two and "
+    "you get Left at Week End. A week can close on a healthy figure while its own surplus "
+    "is negative, which is why they are separate. Lowest In Week is the worst moment inside "
+    "the week, and Status is judged on that rather than on the closing figure. Everyday "
+    "Spending includes the top-up to your expected weekly figure for any week you have not "
+    "logged yet, so untouched weeks are not forecast at zero.",
     F_NOTE, wrap=True)
 sm.merge_cells(f"B{note}:L{note}")
 sm.row_dimensions[note].height = 44
@@ -856,7 +942,7 @@ def fit_to_width(ws, landscape=True, area=None, repeat=None):
 
 
 fit_to_width(ins, landscape=False, area=f"A1:C{INS_LAST}")
-fit_to_width(rec, area=f"A1:J{note_row + 2}", repeat=f"{REC_HDR}:{REC_HDR}")
+fit_to_width(rec, area=f"A1:K{note_row + 2}", repeat=f"{REC_HDR}:{REC_HDR}")
 fit_to_width(cf, area=f"A1:K{block_rows(N_WEEKS)['totals']}")
 fit_to_width(sm, area=f"A1:L{note}")
 
