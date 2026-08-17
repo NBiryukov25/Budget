@@ -715,8 +715,8 @@ cf.freeze_panes = "B12"
 # =================================================================== SUMMARY
 sm = wb.create_sheet("Summary", 3)
 sm.sheet_view.showGridLines = False
-for col, wdt in {"A": 3, "B": 9, "C": 20, "D": 15, "E": 14, "F": 16, "G": 16,
-                 "H": 13, "I": 16, "J": 12, "K": 11}.items():
+for col, wdt in {"A": 3, "B": 7, "C": 19, "D": 15, "E": 13, "F": 16, "G": 15,
+                 "H": 13, "I": 15, "J": 15, "K": 13, "L": 12, "M": 11}.items():
     sm.column_dimensions[col].width = wdt
 
 put(sm, "B1", "13-WEEK SURVIVAL SUMMARY", F_TITLE)
@@ -727,16 +727,18 @@ SM_FIRST = SM_HDR + 1
 SM_LAST = SM_HDR + N_WEEKS
 
 kpis = [
-    ("B4", "Lowest ending balance", f"=MIN($I${SM_FIRST}:$I${SM_LAST})", MONEY_B),
-    ("B5", "Week it happens",
+    # The low point at ANY moment, not just where a week happens to end. A week
+    # can finish healthy and still have gone under on the Tuesday.
+    ("B4", "Lowest you ever get", f"=MIN($J${SM_FIRST}:$J${SM_LAST})", MONEY_B),
+    ("B5", "When that happens",
      f'="Week "&INDEX($B${SM_FIRST}:$B${SM_LAST},'
-     f'MATCH(MIN($I${SM_FIRST}:$I${SM_LAST}),$I${SM_FIRST}:$I${SM_LAST},0))'
-     f'&", beginning "&TEXT(INDEX($C${SM_FIRST}:$C${SM_LAST},'
-     f'MATCH(MIN($I${SM_FIRST}:$I${SM_LAST}),$I${SM_FIRST}:$I${SM_LAST},0)),"mmm d, yyyy")', None),
-    ("B6", "First week you run short",
-     f'=IF(MIN($K${SM_FIRST}:$K${SM_LAST})=999,"None — you stay above zero all {N_WEEKS} weeks",'
-     f'"Week "&MIN($K${SM_FIRST}:$K${SM_LAST})&"  ("&TEXT(INDEX($C${SM_FIRST}:$C${SM_LAST},'
-     f'MATCH(MIN($K${SM_FIRST}:$K${SM_LAST}),$B${SM_FIRST}:$B${SM_LAST},0)),"mmm d, yyyy")&")")', None),
+     f'MATCH(MIN($J${SM_FIRST}:$J${SM_LAST}),$J${SM_FIRST}:$J${SM_LAST},0))'
+     f'&" — "&TEXT(INDEX($K${SM_FIRST}:$K${SM_LAST},'
+     f'MATCH(MIN($J${SM_FIRST}:$J${SM_LAST}),$J${SM_FIRST}:$J${SM_LAST},0)),"ddd mmm d, yyyy")', None),
+    ("B6", "First week you go under",
+     f'=IF(MIN($M${SM_FIRST}:$M${SM_LAST})=999,"None — you never go below zero in {N_WEEKS} weeks",'
+     f'"Week "&MIN($M${SM_FIRST}:$M${SM_LAST})&"  ("&TEXT(INDEX($C${SM_FIRST}:$C${SM_LAST},'
+     f'MATCH(MIN($M${SM_FIRST}:$M${SM_LAST}),$B${SM_FIRST}:$B${SM_LAST},0)),"mmm d, yyyy")&")")', None),
     ("B7", "Total income projected", f"=SUM($E${SM_FIRST}:$E${SM_LAST})", MONEY),
     ("B8", "Total expenses projected",
      f"=SUM($F${SM_FIRST}:$F${SM_LAST})+SUM($G${SM_FIRST}:$G${SM_LAST})", MONEY),
@@ -750,17 +752,19 @@ for ref, label, formula, fmt in kpis:
     sm.merge_cells(f"B{row}:D{row}")
     put(sm, f"E{row}", formula, F_LINK, fmt=fmt, fill=FILL_TOT, border=BOX, align="center")
     if row in (5, 6):
-        sm.merge_cells(f"E{row}:I{row}")
+        sm.merge_cells(f"E{row}:L{row}")
         sm[f"E{row}"].alignment = Alignment(horizontal="left", vertical="center")
 
 sm_cols = [("B", "Week"), ("C", "Week Beginning"), ("D", "Starting Balance"),
-           ("E", "Income"), ("F", "Recurring Expenses"), ("G", "Weekly Expenses"),
-           ("H", "Net Change"), ("I", "Ending Balance"), ("J", "Status"),
-           ("K", "shortfall key")]
+           ("E", "Money In"), ("F", "Recurring Bills"), ("G", "Everyday Spending"),
+           ("H", "Net Change"), ("I", "Left at Week End"), ("J", "Lowest In Week"),
+           ("K", "On"), ("L", "Status"), ("M", "shortfall key")]
 for col, label in sm_cols:
-    put(sm, f"{col}{SM_HDR}", label, F_H1, fill=FILL_HDR, align="center", border=BOX, wrap=True)
-sm.row_dimensions[SM_HDR].height = 30
-sm.column_dimensions["K"].hidden = True
+    fill = {"E": FILL_IN_HDR, "F": FILL_OUT_HDR, "G": FILL_OUT_HDR}.get(col, FILL_HDR)
+    font = F_H2 if col in "EFG" else F_H1
+    put(sm, f"{col}{SM_HDR}", label, font, fill=fill, align="center", border=BOX, wrap=True)
+sm.row_dimensions[SM_HDR].height = 32
+sm.column_dimensions["M"].hidden = True
 
 for w in range(1, N_WEEKS + 1):
     r = SM_HDR + w
@@ -782,9 +786,18 @@ for w in range(1, N_WEEKS + 1):
         F_LINK, fmt=MONEY, border=BOX, fill=band)
     put(sm, f"H{r}", f"=$E{r}-$F{r}-$G{r}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)
     put(sm, f"I{r}", f"={CUR}!$I${tot}", F_BOLD, fmt=MONEY_B, border=BOX, fill=band)
-    put(sm, f"J{r}", f'=IF($I{r}<0,"SHORTFALL",IF($I{r}<{CUR}!$E$7,"TIGHT","OK"))',
+    # The lowest the balance gets at any point inside the week, and the day it
+    # happens. A week can end healthy having gone under midweek, so Status is
+    # judged on this rather than on the closing figure.
+    put(sm, f"J{r}", f"=MIN({CUR}!$I${fs}:$I${lv})", F_BOLD, fmt=MONEY_B,
+        border=BOX, fill=band)
+    put(sm, f"K{r}",
+        f'=IFERROR(INDEX({CUR}!$C${fs}:$C${lv},'
+        f'MATCH(MIN({CUR}!$I${fs}:$I${lv}),{CUR}!$I${fs}:$I${lv},0)),"")',
+        F_LINK, fmt=DATE_F, align="center", border=BOX, fill=band)
+    put(sm, f"L{r}", f'=IF($J{r}<0,"SHORTFALL",IF($J{r}<{CUR}!$E$7,"TIGHT","OK"))',
         F_BOLD, align="center", border=BOX, fill=band)
-    put(sm, f"K{r}", f"=IF($I{r}<0,$B{r},999)", F_BODY)
+    put(sm, f"M{r}", f"=IF($J{r}<0,$B{r},999)", F_BODY)
 
 TOT_R = SM_LAST + 1
 put(sm, f"B{TOT_R}", "TOTAL", F_BOLD, fill=FILL_TOT, border=BOX, align="center")
@@ -794,26 +807,34 @@ for col in "EFGH":
     put(sm, f"{col}{TOT_R}", f"=SUM(${col}${SM_FIRST}:${col}${SM_LAST})", F_BOLD,
         fmt=MONEY if col != "H" else MONEY_B, fill=FILL_TOT, border=BOX)
 put(sm, f"I{TOT_R}", f"=$I${SM_LAST}", F_BOLD, fmt=MONEY_B, fill=FILL_TOT, border=BOX)
-put(sm, f"J{TOT_R}", "", F_BODY, fill=FILL_TOT, border=BOX)
+put(sm, f"J{TOT_R}", f"=MIN($J${SM_FIRST}:$J${SM_LAST})", F_BOLD, fmt=MONEY_B,
+    fill=FILL_TOT, border=BOX)
+for col in "KL":
+    put(sm, f"{col}{TOT_R}", "", F_BODY, fill=FILL_TOT, border=BOX)
 
 sm.conditional_formatting.add(
-    f"B{SM_FIRST}:J{SM_LAST}",
-    FormulaRule(formula=[f'$J{SM_FIRST}="SHORTFALL"'], fill=FILL_WARN,
+    f"B{SM_FIRST}:L{SM_LAST}",
+    FormulaRule(formula=[f'$L{SM_FIRST}="SHORTFALL"'], fill=FILL_WARN,
                 font=Font(name=FONT, size=10, bold=True, color="9C0006")))
 sm.conditional_formatting.add(
-    f"J{SM_FIRST}:J{SM_LAST}",
-    FormulaRule(formula=[f'$J{SM_FIRST}="TIGHT"'],
+    f"L{SM_FIRST}:L{SM_LAST}",
+    FormulaRule(formula=[f'$L{SM_FIRST}="TIGHT"'],
                 font=Font(name=FONT, size=10, bold=True, color="9C6500")))
 sm.conditional_formatting.add(
-    f"D{SM_FIRST}:I{TOT_R}",
+    f"D{SM_FIRST}:J{TOT_R}",
     FormulaRule(formula=[f'AND($D{SM_FIRST}<>"",$D{SM_FIRST}<0)'],
                 font=Font(name=FONT, size=10, bold=True, color="9C0006")))
 
 note = TOT_R + 2
-put(sm, f"B{note}", "Recurring Expenses come from the scheduled rows in each week block; "
-                    "Weekly Expenses come from what you type into that week's variable-expense "
-                    "rows. Both are already netted against income in Net Change.", F_NOTE, wrap=True)
-sm.merge_cells(f"B{note}:J{note}")
+put(sm, f"B{note}",
+    "Money In and the two spending columns come straight from each week block on the Cash "
+    "Flow tab: Recurring Bills from the scheduled rows, Everyday Spending from what you or "
+    "the importer put in the variable rows. Left at Week End is where the week closes. "
+    "Lowest In Week is the worst moment inside it — a week can close healthy having gone "
+    "under midweek, so Status is judged on that, not on the closing figure.",
+    F_NOTE, wrap=True)
+sm.merge_cells(f"B{note}:L{note}")
+sm.row_dimensions[note].height = 44
 sm.row_dimensions[note].height = 30
 sm.freeze_panes = f"B{SM_FIRST}"
 
@@ -837,7 +858,7 @@ def fit_to_width(ws, landscape=True, area=None, repeat=None):
 fit_to_width(ins, landscape=False, area=f"A1:C{INS_LAST}")
 fit_to_width(rec, area=f"A1:J{note_row + 2}", repeat=f"{REC_HDR}:{REC_HDR}")
 fit_to_width(cf, area=f"A1:K{block_rows(N_WEEKS)['totals']}")
-fit_to_width(sm, area=f"A1:J{note}")
+fit_to_width(sm, area=f"A1:L{note}")
 
 wb.active = wb.sheetnames.index("Cash Flow")
 wb.save(OUT)
