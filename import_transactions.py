@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """Append a bank CSV export into the survival workbook.
 
-Written for Revolut/Monarch-style exports with the columns
-Date, Merchant, Category, Account, Amount. Only input cells are written; every
-formula is left alone.
+Reads either export shape and works out which it has:
+
+  * Monarch style - Date, Merchant, Category, Account, Amount
+  * Revolut native - Type, Product, Started Date, Completed Date, Description,
+    Amount, Fee, Currency, State, Balance
+
+Only input cells are written; every formula is left alone.
+
+On a Revolut statement it uses the Started Date (the day you made the purchase,
+which is what the sheet records and what the beginning balance was struck
+against), nets any Fee into the amount, drops anything not COMPLETED so a
+reverted charge is never counted, and finally checks the sheet against the
+statement's own closing Balance.
 
 What it does, in order:
 
@@ -32,6 +42,7 @@ from collections import defaultdict
 from openpyxl import load_workbook
 
 N_WEEKS, SLOTS, FIRST_BLOCK = 13, 10, 13
+LOG_FIRST, LOG_LAST = 9, 308
 DATE_F = "ddd mm/dd"
 MATCH_DAYS = 4          # how far a posting may drift from its scheduled date
 CENTS = 0.005
@@ -44,29 +55,67 @@ def block(w, var_rows):
 
 
 def detect_var_rows(cf):
-    """Work out the block height from where week 2's banner sits."""
+    """Work out the block height from where week 2's banner sits.
+
+    Match the banner text itself, not merely "is a formula" - other rows in the
+    block are formulas too, and the expected-spending top-up row would otherwise
+    be mistaken for the next week's header.
+    """
     for vr in range(4, 41):
         h2 = FIRST_BLOCK + (SLOTS + vr + 5)
         v = cf[f"B{h2}"].value
-        if isinstance(v, str) and v.startswith("="):
+        if isinstance(v, str) and v.startswith('="WEEK '):
             return vr
     raise SystemExit("could not work out the block height - is this the right workbook?")
 
 
+def _num(v):
+    v = (v or "").strip().replace("$", "").replace(",", "")
+    return float(v) if v else 0.0
+
+
 def read_csv(path):
-    out = []
+    """Return normalised rows, plus the statement's closing balance if it has one."""
+    out, closing = [], None
     with open(path, newline="", encoding="utf-8-sig") as fh:
-        for row in csv.DictReader(fh):
-            raw = (row.get("Amount") or "").strip().replace("$", "").replace(",", "")
-            if not raw or not (row.get("Date") or "").strip():
+        rows = list(csv.DictReader(fh))
+    if not rows:
+        return out, closing
+    revolut = "Started Date" in rows[0]
+
+    for row in rows:
+        if revolut:
+            if (row.get("State") or "").strip().upper() != "COMPLETED":
+                continue          # REVERTED / PENDING never touched the balance
+            stamp = (row.get("Started Date") or row.get("Completed Date") or "").strip()
+            if not stamp:
+                continue
+            y, m, d = [int(x) for x in stamp.split(" ")[0].split("-")]
+            # A fee is charged alongside the amount, so the balance moves by both.
+            amount = _num(row.get("Amount")) - abs(_num(row.get("Fee")))
+            out.append({"date": dt.date(y, m, d),
+                        "merchant": (row.get("Description") or "?").strip(),
+                        "category": (row.get("Type") or "").strip(),
+                        "account": "", "amount": amount,
+                        "seq": (row.get("Completed Date") or "").strip(),
+                        "balance": row.get("Balance")})
+        else:
+            if not (row.get("Date") or "").strip() or not (row.get("Amount") or "").strip():
                 continue
             m, d, y = [int(x) for x in row["Date"].split("/")]
             out.append({"date": dt.date(y, m, d),
                         "merchant": (row.get("Merchant") or "?").strip(),
                         "category": (row.get("Category") or "").strip(),
                         "account": (row.get("Account") or "").strip(),
-                        "amount": float(raw)})
-    return out
+                        "amount": _num(row.get("Amount")),
+                        "seq": "", "balance": None})
+
+    if revolut:
+        dated = [r for r in out if r.get("seq") and (r.get("balance") or "").strip()]
+        if dated:
+            last = max(dated, key=lambda r: r["seq"])
+            closing = (_num(last["balance"]), last["seq"].split(" ")[0])
+    return out, closing
 
 
 def main():
@@ -85,7 +134,7 @@ def main():
     start = start.date() if isinstance(start, dt.datetime) else start
     end = start + dt.timedelta(days=N_WEEKS * 7 - 1)
 
-    txns = read_csv(a.csv_path)
+    txns, closing = read_csv(a.csv_path)
     kept, skipped = [], defaultdict(list)
     for t in txns:
         if t["date"] < start:            skipped["before start"].append(t)
@@ -94,7 +143,7 @@ def main():
         else:                            kept.append(t)
 
     # what the sheet already holds, so a re-run cannot double-post
-    existing = set()
+    existing, by_date_amount = set(), set()
     for w in range(1, N_WEEKS + 1):
         b = block(w, var_rows)
         for r in range(b["first_var"], b["last_var"] + 1):
@@ -102,8 +151,9 @@ def main():
             if nm and not str(nm).startswith("="):
                 d = cfv[f"C{r}"].value
                 d = d.date() if isinstance(d, dt.datetime) else d
-                existing.add((str(nm).strip().lower(), d,
-                              round(float(cf[f"E{r}"].value or 0), 2)))
+                amt = round(float(cf[f"E{r}"].value or 0), 2)
+                existing.add((str(nm).strip().lower(), d, amt))
+                by_date_amount.add((d, amt))     # same charge, different wording
 
     # scheduled recurring occurrences, so a posting can be matched to its bill
     sched = []
@@ -119,6 +169,20 @@ def main():
                           "amount": float(cfv[f"E{r}"].value or 0),
                           "kind": cfv[f"D{r}"].value,
                           "already": cf[f"F{r}"].value is not None})
+
+    # Actuals belong in the Paid Log, keyed to the bill, not in the
+    # position-bound Amount Paid cell that a date change would reassign.
+    plog = wb["Paid Log"] if "Paid Log" in wb.sheetnames else None
+    logged, log_free = set(), []
+    if plog is not None:
+        for r in range(LOG_FIRST, LOG_LAST + 1):
+            nm = plog[f"C{r}"].value
+            if nm:
+                d = plog[f"B{r}"].value
+                logged.add((str(nm).strip().lower(),
+                            d.date() if isinstance(d, dt.datetime) else d))
+            else:
+                log_free.append(r)
 
     matched, leftover = [], []
     used = set()
@@ -151,7 +215,7 @@ def main():
     for (d, merch), ts in sorted(groups.items()):
         total = round(sum(abs(x["amount"]) for x in ts), 2)
         label = merch if len(ts) == 1 else f"{merch} ({len(ts)} charges)"
-        if (label.strip().lower(), d, total) in existing:
+        if (label.strip().lower(), d, total) in existing or (d, total) in by_date_amount:
             dupes.append((label, d, total)); continue
         to_write.append({"date": d, "label": label, "amount": total,
                          "week": (d - start).days // 7 + 1, "n": len(ts)})
@@ -178,7 +242,8 @@ def main():
     if matched:
         print("matched to a scheduled bill (recorded as Amount Paid / Received):")
         for t, s in matched:
-            note = " — already recorded, left alone" if s["already"] else ""
+            done = s["already"] or (str(s["name"]).strip().lower(), s["date"]) in logged
+            note = " — already recorded, left alone" if done else " — into the Paid Log"
             print(f"   {t['date']:%b %d} {t['merchant']:24s} {abs(t['amount']):>8.2f}"
                   f"  ->  {s['name']} sched {s['date']:%b %d}{note}")
         print()
@@ -201,8 +266,16 @@ def main():
         return
 
     for t, s in matched:
-        if not s["already"]:
-            cf[f"F{s['row']}"] = round(abs(t["amount"]), 2)
+        key = (str(s["name"]).strip().lower(), s["date"])
+        if s["already"] or key in logged or plog is None or not log_free:
+            continue
+        r = log_free.pop(0)
+        plog[f"B{r}"] = s["date"]
+        plog[f"B{r}"].number_format = "ddd mmm d, yyyy"
+        plog[f"C{r}"] = s["name"]
+        plog[f"D{r}"] = round(abs(t["amount"]), 2)
+        plog[f"E{r}"] = f"{t['merchant']} on {t['date']:%b %d}"
+        logged.add(key)
     for i in placed:
         cf[f"B{i['row']}"] = i["label"]
         cf[f"C{i['row']}"] = i["date"]
@@ -212,6 +285,11 @@ def main():
     out = a.out or a.book
     wb.save(out)
     print(f"\nwrote {out}")
+
+    if closing:
+        bal, on = closing
+        print(f"\nstatement closing balance {bal:,.2f} on {on} — recalculate and check the "
+              f"cash flow reads the same on that date")
 
 
 if __name__ == "__main__":
