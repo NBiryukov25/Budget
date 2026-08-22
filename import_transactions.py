@@ -37,11 +37,13 @@ What it does, in order:
 import argparse
 import csv
 import datetime as dt
+import re
 from collections import defaultdict
 
 from openpyxl import load_workbook
 
 N_WEEKS, SLOTS, FIRST_BLOCK = 13, 10, 13
+NEAR_DAYS = 3           # a hand-entered row may sit a day or two off the bank's date
 LOG_FIRST, LOG_LAST = 9, 308
 DATE_F = "ddd mm/dd"
 MATCH_DAYS = 4          # how far a posting may drift from its scheduled date
@@ -69,6 +71,13 @@ def detect_var_rows(cf):
     raise SystemExit("could not work out the block height - is this the right workbook?")
 
 
+def norm(name):
+    """Loose merchant key: 'Shell (2 charges)' and 'Shell' are the same shop."""
+    t = re.sub(r"\(\d+\s*charges?\)", "", str(name or "").lower())
+    t = re.sub(r"[^a-z0-9]", "", t)
+    return t[:12]
+
+
 def _num(v):
     v = (v or "").strip().replace("$", "").replace(",", "")
     return float(v) if v else 0.0
@@ -90,7 +99,11 @@ def read_csv(path):
             stamp = (row.get("Started Date") or row.get("Completed Date") or "").strip()
             if not stamp:
                 continue
-            y, m, d = [int(x) for x in stamp.split(" ")[0].split("-")]
+            day = stamp.split(" ")[0]
+            if "-" in day:
+                y, m, d = [int(x) for x in day.split("-")]
+            else:                       # 8/14/2026
+                m, d, y = [int(x) for x in day.split("/")]
             # A fee is charged alongside the amount, so the balance moves by both.
             amount = _num(row.get("Amount")) - abs(_num(row.get("Fee")))
             out.append({"date": dt.date(y, m, d),
@@ -113,7 +126,11 @@ def read_csv(path):
     if revolut:
         dated = [r for r in out if r.get("seq") and (r.get("balance") or "").strip()]
         if dated:
-            last = max(dated, key=lambda r: r["seq"])
+            def _stamp(r):
+                d = r["seq"].split(" ")[0]
+                p2 = [int(x) for x in (d.split("-") if "-" in d else d.split("/"))]
+                return (p2[0], p2[1], p2[2]) if "-" in d else (p2[2], p2[0], p2[1])
+            last = max(dated, key=lambda r: (_stamp(r), r["seq"]))
             closing = (_num(last["balance"]), last["seq"].split(" ")[0])
     return out, closing
 
@@ -143,7 +160,7 @@ def main():
         else:                            kept.append(t)
 
     # what the sheet already holds, so a re-run cannot double-post
-    existing, by_date_amount = set(), set()
+    existing, by_date_amount, near = set(), set(), []
     for w in range(1, N_WEEKS + 1):
         b = block(w, var_rows)
         for r in range(b["first_var"], b["last_var"] + 1):
@@ -154,6 +171,8 @@ def main():
                 amt = round(float(cf[f"E{r}"].value or 0), 2)
                 existing.add((str(nm).strip().lower(), d, amt))
                 by_date_amount.add((d, amt))     # same charge, different wording
+                if d:
+                    near.append((norm(nm), d, amt))   # same shop, date a day or two off
 
     # scheduled recurring occurrences, so a posting can be matched to its bill
     sched = []
@@ -184,25 +203,32 @@ def main():
             else:
                 log_free.append(r)
 
-    matched, leftover = [], []
+    matched, leftover, orphan_income = [], [], []
     used = set()
     for t in kept:
         want_in = t["amount"] > 0
-        hit = None
+        cands = []
         for s in sched:
             if s["row"] in used or s["date"] is None:
                 continue
             if (s["kind"] == "Income") != want_in:
                 continue
-            if abs(s["amount"] - abs(t["amount"])) > CENTS:
-                continue
             if abs((s["date"] - t["date"]).days) > MATCH_DAYS:
                 continue
-            hit = s
-            break
-        if hit:
+            gap = abs(s["amount"] - abs(t["amount"]))
+            # A paycheck that varies is exactly what the Paid Log exists for, so
+            # income matches on timing; a bill still has to match to the cent.
+            if not want_in and gap > CENTS:
+                continue
+            cands.append((abs((s["date"] - t["date"]).days), gap, s))
+        if cands:
+            cands.sort(key=lambda c: (c[0], c[1]))
+            hit = cands[0][2]
             used.add(hit["row"])
             matched.append((t, hit))
+        elif want_in:
+            # never let money coming in be written into an expenses-only row
+            orphan_income.append(t)
         else:
             leftover.append(t)
 
@@ -216,6 +242,11 @@ def main():
         total = round(sum(abs(x["amount"]) for x in ts), 2)
         label = merch if len(ts) == 1 else f"{merch} ({len(ts)} charges)"
         if (label.strip().lower(), d, total) in existing or (d, total) in by_date_amount:
+            dupes.append((label, d, total)); continue
+        k = norm(label)
+        if any(abs(amt - total) < CENTS and abs((dd - d).days) <= NEAR_DAYS
+               and (k.startswith(nk) or nk.startswith(k))
+               for nk, dd, amt in near if nk and k):
             dupes.append((label, d, total)); continue
         to_write.append({"date": d, "label": label, "amount": total,
                          "week": (d - start).days // 7 + 1, "n": len(ts)})
@@ -250,6 +281,13 @@ def main():
     if dupes:
         print(f"already in the sheet, not re-added ({len(dupes)}):")
         for l, d, amt in dupes: print(f"   {d:%b %d} {l:30s} {amt:>8.2f}")
+        print()
+    if orphan_income:
+        print("!! money IN with no scheduled match — NOT written, would have been "
+              "recorded as spending:")
+        for t in orphan_income:
+            print(f"   {t['date']:%b %d} {t['merchant']:34s} +{t['amount']:>9.2f}")
+        print("   add a recurring item for it, or log it by hand.")
         print()
     print(f"variable rows to add ({len(placed)}):")
     tot = 0.0

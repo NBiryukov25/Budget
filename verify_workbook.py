@@ -6,7 +6,18 @@ from openpyxl import load_workbook
 RECALC = "/root/.claude/skills/synced/xlsx/scripts/recalc.py"
 ERRS = ("#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NULL!", "#NUM!", "Err:")
 n = lambda v: v if isinstance(v, (int, float)) else 0
-SLOTS, FB, NW, VR = 10, 13, 13, 20
+SLOTS, FB, NW = 10, 13, 13
+
+def _detect(path):
+    """Read the block height off the workbook instead of assuming it."""
+    cf = load_workbook(path)["Cash Flow"]
+    for vr in range(4, 61):
+        v = cf[f"B{FB + (SLOTS + vr + 5)}"].value
+        if isinstance(v, str) and v.startswith('="WEEK '):
+            return vr
+    raise SystemExit("cannot determine block height")
+
+VR = _detect(sys.argv[1])
 blk = lambda w: {"h": FB+(SLOTS+VR+5)*(w-1), "fs": FB+(SLOTS+VR+5)*(w-1)+2,
                  "lv": FB+(SLOTS+VR+5)*(w-1)+2+SLOTS+VR,
                  "tot": FB+(SLOTS+VR+5)*(w-1)+3+SLOTS+VR}
@@ -33,7 +44,7 @@ def result(label, ok, detail=""):
 
 src = sys.argv[1]
 allok = True
-print("VALIDATION")
+print(f"VALIDATION  ({VR} variable rows per week)")
 
 # --- no calculation errors anywhere
 bad = scan_errors(src)

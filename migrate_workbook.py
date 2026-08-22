@@ -56,7 +56,7 @@ def main():
 
     # input cells - E5 may itself be a formula the user typed, so copy verbatim
     moved = []
-    for ref in ("E5", "E6", "E7"):
+    for ref in ("E5", "E6", "E7", "E8"):
         ncf[ref] = ocf[ref].value
         moved.append(f"{ref}={ocf[ref].value}")
 
@@ -69,6 +69,19 @@ def main():
         rec_rows += 1
         for col in "BCDEFGHIJ":
             nrec[f"{col}{r}"] = orec[f"{col}{r}"].value
+
+    # the Paid Log is the record of actual payments and must survive a rebuild
+    log_n = 0
+    if "Paid Log" in old.sheetnames and "Paid Log" in new.sheetnames:
+        op, np_ = old["Paid Log"], new["Paid Log"]
+        opv = oldv["Paid Log"]
+        for r in range(9, 309):
+            if op[f"C{r}"].value:
+                np_[f"B{r}"] = opv[f"B{r}"].value
+                np_[f"B{r}"].number_format = "ddd mmm d, yyyy"
+                for col in "CDE":
+                    np_[f"{col}{r}"] = op[f"{col}{r}"].value
+                log_n += 1
 
     paid_n = var_n = 0
     for w in range(1, N_WEEKS + 1):
@@ -98,7 +111,7 @@ def main():
     new.save(a.out)
     print(f"inputs: {', '.join(moved)}")
     print(f"recurring rows: {rec_rows} | amount-paid entries: {paid_n} | "
-          f"variable rows: {var_n}")
+          f"variable rows: {var_n} | paid-log entries: {log_n}")
     print(f"-> {a.out}")
 
 
