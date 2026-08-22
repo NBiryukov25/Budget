@@ -86,7 +86,7 @@ base_end = n(sm["I25"].value)
 # --- overrides: amount, then removal
 t = "/tmp/t_ovr.xlsx"; shutil.copy(src, t)
 w = load_workbook(t); o = w["Overrides"]
-o["B9"], o["C9"], o["E9"] = "Spectrum", dt.date(2026, 8, 21), 100.00
+o["B9"], o["C9"], o["E9"] = "Spectrum", dt.date(2026, 9, 21), 100.00
 w.save(t); recalc(t)
 after = n(load_workbook(t, data_only=True)["Summary"]["I25"].value)
 allok &= result("override amount applies", abs(after - (base_end + 71.10)) < 0.02,
@@ -100,13 +100,14 @@ allok &= result("removing the override reverts exactly", abs(back - base_end) < 
 
 # --- overrides: date move
 shutil.copy(src, t); w = load_workbook(t); o = w["Overrides"]
-o["B9"], o["C9"], o["D9"] = "Spectrum", dt.date(2026, 8, 21), dt.date(2026, 8, 26)
+o["B9"], o["C9"], o["D9"] = "Spectrum", dt.date(2026, 9, 21), dt.date(2026, 9, 26)
 w.save(t); recalc(t)
 vv = load_workbook(t, data_only=True)["Cash Flow"]
-moved = [vv[f"C{r}"].value for w2 in (1, 2) for r in range(blk(w2)["fs"], blk(w2)["fs"]+SLOTS)
+moved = [vv[f"C{r}"].value for w2 in range(1, NW+1)
+         for r in range(blk(w2)["fs"], blk(w2)["fs"]+SLOTS)
          if vv[f"B{r}"].value == "Spectrum"]
 allok &= result("override date moves the occurrence",
-                any(d and d.day == 26 for d in moved), str([str(d)[:10] for d in moved]))
+                any(d and d.month == 9 and d.day == 26 for d in moved), str([str(d)[:10] for d in moved]))
 
 # --- the historical-payment bug: change a FUTURE date, past payment must not move
 shutil.copy(src, t); w = load_workbook(t); rr = w["Recurring"]
