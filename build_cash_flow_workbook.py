@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Weekly_Cash_Flow_Survival.xlsx.
+"""Build Weekly_Cash_Flow_Survival_TEMPLATE.xlsx, the empty workbook.
 
 Everything the workbook computes is a live Excel formula, so editing the
 Recurring sheet or the beginning balance re-drives the whole model.
@@ -21,7 +21,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-OUT = "Weekly_Cash_Flow_Survival.xlsx"
+OUT = "Weekly_Cash_Flow_Survival_TEMPLATE.xlsx"
 
 FONT = "Arial"
 
