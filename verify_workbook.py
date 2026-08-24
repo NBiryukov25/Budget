@@ -46,6 +46,15 @@ src = sys.argv[1]
 allok = True
 print(f"VALIDATION  ({VR} variable rows per week)")
 
+# Every baseline below reads cached results, and a workbook last written by
+# openpyxl carries none - the checks would compare against zeroes and report
+# failures that are entirely an artifact of the source being uncalculated.
+# Work from a recalculated copy so the baselines are real.
+_warm = "/tmp/t_src.xlsx"
+shutil.copy(src, _warm)
+recalc(_warm)
+src = _warm
+
 # --- no calculation errors anywhere
 bad = scan_errors(src)
 allok &= result("no #REF!/#VALUE!/#NAME? anywhere", not bad, "; ".join(bad[:5]))
@@ -83,16 +92,22 @@ allok &= result("ACTUAL and FORECAST both present", tags == {"ACTUAL", "FORECAST
 
 base_end = n(sm["I25"].value)
 
+# The tests write a probe override. Row 9 is not necessarily free - the user
+# keeps real overrides there - and clobbering one silently changes the very
+# baseline the test compares against. Take the first genuinely empty row.
+_ov = load_workbook(src)["Overrides"]
+OR = next(r for r in range(9, 60) if _ov[f"B{r}"].value is None)
+
 # --- overrides: amount, then removal
 t = "/tmp/t_ovr.xlsx"; shutil.copy(src, t)
 w = load_workbook(t); o = w["Overrides"]
-o["B9"], o["C9"], o["E9"] = "Spectrum", dt.date(2026, 9, 21), 100.00
+o[f"B{OR}"], o[f"C{OR}"], o[f"E{OR}"] = "Spectrum", dt.date(2026, 9, 21), 100.00
 w.save(t); recalc(t)
 after = n(load_workbook(t, data_only=True)["Summary"]["I25"].value)
 allok &= result("override amount applies", abs(after - (base_end + 71.10)) < 0.02,
                 f"{base_end:.2f} -> {after:.2f}")
 w = load_workbook(t)
-for c in "BCDEF": w["Overrides"][f"{c}9"] = None
+for c in "BCDEF": w["Overrides"][f"{c}{OR}"] = None
 w.save(t); recalc(t)
 back = n(load_workbook(t, data_only=True)["Summary"]["I25"].value)
 allok &= result("removing the override reverts exactly", abs(back - base_end) < 0.005,
@@ -100,7 +115,7 @@ allok &= result("removing the override reverts exactly", abs(back - base_end) < 
 
 # --- overrides: date move
 shutil.copy(src, t); w = load_workbook(t); o = w["Overrides"]
-o["B9"], o["C9"], o["D9"] = "Spectrum", dt.date(2026, 9, 21), dt.date(2026, 9, 26)
+o[f"B{OR}"], o[f"C{OR}"], o[f"D{OR}"] = "Spectrum", dt.date(2026, 9, 21), dt.date(2026, 9, 26)
 w.save(t); recalc(t)
 vv = load_workbook(t, data_only=True)["Cash Flow"]
 moved = [vv[f"C{r}"].value for w2 in range(1, NW+1)
