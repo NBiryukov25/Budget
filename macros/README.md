@@ -115,6 +115,22 @@ In the 8-6-26 file, Region was a `VLOOKUP` from the SAP number into a
 SAP-number-to-region table on a hidden tab. A file without that table has
 nothing to fill Region from, so it has to be supplied before the pivot can match.
 
+## Collapsed levels
+
+A pivot remembers which levels are collapsed. If the year or quarter items are
+collapsed, only that level's totals render and the month columns never appear —
+and because the design turns drill indicators off to match the 8-6-26 report,
+there is no `+` left to expand them by hand.
+
+The macro therefore expands Region, Customer, Years and Quarters explicitly on
+every run, so the collapse state the workbook happens to be carrying doesn't
+change the result.
+
+It also hides periods with no records. Grouping a date field creates all twelve
+months whether or not the data reaches them, plus a `<` and a `>` item either
+side of the range, and those would otherwise show as empty columns. Set
+`HIDE_EMPTY_PERIODS = False` to show every period instead.
+
 ## Check which version is loaded
 
 Every message the module shows is stamped with its version — the title bar of

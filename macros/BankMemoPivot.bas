@@ -73,6 +73,11 @@ Private Const BAND_QUARTERS    As Boolean = True
 ' uses a different word; change this and the banding keeps working.
 Private Const QUARTER_PREFIX   As String = "Qtr"
 
+' Date grouping invents an item for every month of the year plus one either
+' side of the range, so periods with no records would show as empty columns.
+' The 8-6-26 report has those hidden. Set False to show every period.
+Private Const HIDE_EMPTY_PERIODS As Boolean = True
+
 Private Const VALUE_COL_WIDTH  As Double = 13.14
 Private Const ROW1_HEIGHT      As Double = 20.1
 Private Const ROW2_HEIGHT      As Double = 20.1
@@ -82,7 +87,7 @@ Private Const SHEET_ZOOM       As Long = 90
 ' ---- Version ----------------------------------------------------------------
 ' Stamped into every message this module shows, so there is never any doubt
 ' about which copy of the code a workbook is actually running.
-Private Const MACRO_VERSION    As String = "v4"
+Private Const MACRO_VERSION    As String = "v5"
 
 ' ---- Run state ---------------------------------------------------------------
 ' gStep names the phase in progress so a failure can say where it happened.
@@ -461,6 +466,93 @@ Private Sub ApplyLayout(pt As PivotTable)
     OptSet pt, "ShowTableStyleRowStripes", False
     OptSet pt, "ShowTableStyleColumnStripes", False
     OptSet pt, "ShowTableStyleLastColumn", True
+
+    gStep = "expanding the year, quarter and month levels"
+    ExpandAllLevels pt
+End Sub
+
+
+'==============================================================================
+' Expanding the hierarchy
+'==============================================================================
+
+' A pivot whose year or quarter items are collapsed shows that level's totals
+' and nothing beneath, so the month columns never appear. The 8-6-26 report has
+' every level expanded, and since the design turns drill indicators off there is
+' no +/- left to open them by hand, so they are opened here.
+Private Sub ExpandAllLevels(pt As PivotTable)
+    Dim pfYears As PivotField, pfQuarters As PivotField, pfMonths As PivotField
+
+    ExpandField PF(pt, FLD_REGION)
+    ExpandField PF(pt, FLD_CUSTOMER)
+
+    Set pfYears = FieldStartingWith(pt, "Years")
+    Set pfQuarters = FieldStartingWith(pt, "Quarters")
+    Set pfMonths = FieldStartingWith(pt, "Months")
+
+    If Not pfYears Is Nothing Then ExpandField pfYears
+    If Not pfQuarters Is Nothing Then ExpandField pfQuarters
+
+    If HIDE_EMPTY_PERIODS Then
+        gStep = "hiding periods with no records"
+        If Not pfMonths Is Nothing Then HideEmptyItems pfMonths
+        If Not pfQuarters Is Nothing Then HideEmptyItems pfQuarters
+        If Not pfYears Is Nothing Then HideEmptyItems pfYears
+    End If
+End Sub
+
+
+Private Sub ExpandField(pf As PivotField)
+    Dim pi As PivotItem
+
+    If pf Is Nothing Then Exit Sub
+
+    On Error Resume Next
+    pf.ShowDetail = True
+
+    If Err.Number <> 0 Then
+        ' Some builds only take it one item at a time.
+        Err.Clear
+        For Each pi In pf.PivotItems
+            pi.ShowDetail = True
+            Err.Clear
+        Next pi
+    End If
+    On Error GoTo 0
+End Sub
+
+
+' Grouping a date field creates all twelve months whether or not the data
+' reaches them, plus a "<" and a ">" item either side of the range. Anything
+' with no records behind it is hidden so the table only spans real periods.
+Private Sub HideEmptyItems(pf As PivotField)
+    Dim pi As PivotItem
+    Dim populated As Long
+
+    On Error Resume Next
+
+    ' Count first: hiding every item in a field is not allowed, so if nothing
+    ' has records the field is left alone.
+    For Each pi In pf.PivotItems
+        If pi.RecordCount > 0 Then populated = populated + 1
+        Err.Clear
+    Next pi
+
+    If populated = 0 Then
+        On Error GoTo 0
+        Exit Sub
+    End If
+
+    For Each pi In pf.PivotItems
+        If pi.RecordCount > 0 Then
+            If pi.Visible <> True Then pi.Visible = True
+        Else
+            If pi.Visible <> False Then pi.Visible = False
+        End If
+        Err.Clear
+    Next pi
+
+    On Error GoTo 0
 End Sub
 
 
