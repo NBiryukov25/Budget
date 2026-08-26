@@ -79,6 +79,13 @@ Private Const ROW2_HEIGHT      As Double = 20.1
 Private Const ROW3_HEIGHT      As Double = 13.5
 Private Const SHEET_ZOOM       As Long = 90
 
+' ---- Run state ---------------------------------------------------------------
+' gStep names the phase in progress so a failure can say where it happened.
+' gSkipped collects settings this Excel would not accept, which are reported
+' together at the end rather than being allowed to abort the run.
+Private gStep                  As String
+Private gSkipped               As String
+
 
 '==============================================================================
 ' Entry points
@@ -90,29 +97,37 @@ Public Sub RefreshSummaryPivot()
 
     On Error GoTo Failed
     Application.ScreenUpdating = False
+    BeginRun
 
+    gStep = "finding the Summary sheet and its pivot"
     Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
     Set pt = FindPivot(ws)
 
     If pt Is Nothing Then
+        gStep = "creating the pivot table"
         Set pt = CreatePivot(ws)
     Else
+        gStep = "re-pointing the pivot at the source sheet"
         RepointPivotCache pt
     End If
 
     ApplyLayout pt
+    gStep = "moving the pivot to cell A1"
     MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    ReportSkipped
     WarnIfRegionEmpty
     Exit Sub
 
 Failed:
     Application.ScreenUpdating = True
     MsgBox "Could not refresh the summary pivot." & vbCrLf & vbCrLf & _
-           Err.Description, vbExclamation, "Bank Memo Pivot"
+           "Step: " & gStep & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbExclamation, "Bank Memo Pivot"
 End Sub
 
 
@@ -122,6 +137,7 @@ Public Sub FormatSummaryPivot()
 
     On Error GoTo Failed
     Application.ScreenUpdating = False
+    BeginRun
 
     Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
     Set pt = FindPivot(ws)
@@ -133,18 +149,22 @@ Public Sub FormatSummaryPivot()
     End If
 
     ApplyLayout pt
+    gStep = "moving the pivot to cell A1"
     MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    ReportSkipped
     WarnIfRegionEmpty
     Exit Sub
 
 Failed:
     Application.ScreenUpdating = True
     MsgBox "Could not format the summary pivot." & vbCrLf & vbCrLf & _
-           Err.Description, vbExclamation, "Bank Memo Pivot"
+           "Step: " & gStep & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbExclamation, "Bank Memo Pivot"
 End Sub
 
 
@@ -159,24 +179,29 @@ Public Sub RebuildSummaryPivot()
 
     On Error GoTo Failed
     Application.ScreenUpdating = False
+    BeginRun
 
     Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
     ws.Cells.Clear
 
     Set pt = CreatePivot(ws)
     ApplyLayout pt
+    gStep = "moving the pivot to cell A1"
     MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    ReportSkipped
     WarnIfRegionEmpty
     Exit Sub
 
 Failed:
     Application.ScreenUpdating = True
     MsgBox "Could not rebuild the summary pivot." & vbCrLf & vbCrLf & _
-           Err.Description, vbExclamation, "Bank Memo Pivot"
+           "Step: " & gStep & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbExclamation, "Bank Memo Pivot"
 End Sub
 
 
@@ -333,6 +358,7 @@ End Function
 '==============================================================================
 
 Private Sub ApplyLayout(pt As PivotTable)
+    gStep = "placing the row fields"
     ' Rows: Region > Customer > SAP No.
     PlaceField PF(pt, FLD_REGION), xlRowField, 1
     PlaceField PF(pt, FLD_CUSTOMER), xlRowField, 2
@@ -343,38 +369,106 @@ Private Sub ApplyLayout(pt As PivotTable)
     SetAutoSubtotal PF(pt, FLD_CUSTOMER), True
     SetAutoSubtotal PF(pt, FLD_SAP), False
 
-    PF(pt, FLD_REGION).AutoSort xlAscending, PF(pt, FLD_REGION).Name
-    PF(pt, FLD_CUSTOMER).AutoSort xlAscending, PF(pt, FLD_CUSTOMER).Name
+    OptSortAscending PF(pt, FLD_REGION)
+    OptSortAscending PF(pt, FLD_CUSTOMER)
 
     ' Columns: Date grouped into Years > Quarters > Months
+    gStep = "grouping the Date column into years, quarters and months"
     EnsureDateGrouping pt
 
     ' Values: count of SAP No.
+    gStep = "adding the count of " & FLD_SAP
     SetValueField pt
 
-    With pt
-        .RowAxisLayout xlTabularRow
-        .RepeatAllLabels xlRepeatLabels
-        .SubtotalLocation xlAtBottom
+    ' Every option below is applied on its own. Excel builds differ in which
+    ' of these they expose, and one unsupported property should not cost the
+    ' whole run, so anything that will not take is collected and reported at
+    ' the end instead of raising.
+    gStep = "applying the pivot layout options"
+    OptCall pt, "RowAxisLayout", xlTabularRow
+    OptCall pt, "RepeatAllLabels", xlRepeatLabels
+    OptCall pt, "SubtotalLocation", xlAtBottom
 
-        .RowGrand = True
-        .ColumnGrand = False
-        .GrandTotalName = GRAND_TOTAL_CAP
-        .ColumnHeaderCaption = COL_HEADER_CAP
+    gStep = "applying the pivot total options"
+    OptSet pt, "RowGrand", True
+    OptSet pt, "ColumnGrand", False
+    OptSet pt, "GrandTotalName", GRAND_TOTAL_CAP
+    OptSet pt, "ColumnHeaderCaption", COL_HEADER_CAP
+    OptSet pt, "ShowDrillIndicators", False
 
-        .ShowDrillIndicators = False
+    ' Keep our formatting and column widths across a plain Refresh Data.
+    OptSet pt, "PreserveFormatting", True
+    OptSet pt, "HasAutoFormat", False
 
-        ' Keep our formatting and column widths across a plain Refresh Data.
-        .PreserveFormatting = True
-        .HasAutoFormat = False
+    gStep = "applying the pivot table style"
+    OptSet pt, "TableStyle2", PIVOT_STYLE
+    OptSet pt, "ShowTableStyleRowHeaders", True
+    OptSet pt, "ShowTableStyleColumnHeaders", True
+    OptSet pt, "ShowTableStyleRowStripes", False
+    OptSet pt, "ShowTableStyleColumnStripes", False
+    OptSet pt, "ShowTableStyleLastColumn", True
+End Sub
 
-        .TableStyle2 = PIVOT_STYLE
-        .ShowTableStyleRowHeaders = True
-        .ShowTableStyleColumnHeaders = True
-        .ShowTableStyleRowStripes = False
-        .ShowTableStyleColumnStripes = False
-        .ShowTableStyleLastColumn = True
-    End With
+
+'==============================================================================
+' Fail-soft setters
+'==============================================================================
+
+Private Sub BeginRun()
+    gStep = "starting"
+    gSkipped = ""
+End Sub
+
+
+' Sets a property by name. A property this Excel does not expose is noted and
+' skipped rather than stopping the run.
+Private Sub OptSet(target As Object, propertyName As String, value As Variant)
+    On Error Resume Next
+    CallByName target, propertyName, VbLet, value
+    If Err.Number <> 0 Then
+        Note propertyName, Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+
+' Same, for the settings Excel exposes as one-argument methods rather than
+' properties.
+Private Sub OptCall(target As Object, methodName As String, argument As Variant)
+    On Error Resume Next
+    CallByName target, methodName, VbMethod, argument
+    If Err.Number <> 0 Then
+        Note methodName, Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+
+Private Sub OptSortAscending(pf As PivotField)
+    On Error Resume Next
+    pf.AutoSort xlAscending, pf.Name
+    If Err.Number <> 0 Then
+        Note "sorting " & pf.Name, Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+
+Private Sub Note(what As String, why As String)
+    gSkipped = gSkipped & vbCrLf & "    " & what & " - " & why
+End Sub
+
+
+Private Sub ReportSkipped()
+    If Len(gSkipped) = 0 Then Exit Sub
+
+    MsgBox "The pivot was rebuilt and formatted, but this copy of Excel " & _
+           "would not accept these settings:" & vbCrLf & gSkipped & _
+           vbCrLf & vbCrLf & "Everything else was applied.", _
+           vbInformation, "Bank Memo Pivot"
 End Sub
 
 
@@ -397,11 +491,9 @@ Private Sub SetValueField(pt As PivotTable)
         Set df = pt.AddDataField(PF(pt, FLD_SAP), DATA_CAPTION, xlCount)
     End If
 
-    With df
-        .Function = xlCount     ' resets the caption, so set the caption after
-        .Caption = DATA_CAPTION
-        .NumberFormat = "General"
-    End With
+    df.Function = xlCount       ' resets the caption, so set the caption after
+    OptSet df, "Caption", DATA_CAPTION
+    OptSet df, "NumberFormat", "General"
 End Sub
 
 
@@ -419,6 +511,7 @@ End Sub
 Private Sub SetAutoSubtotal(pf As PivotField, wanted As Boolean)
     Dim i As Long
 
+    On Error Resume Next
     If wanted Then
         pf.Subtotals(1) = True
     Else
@@ -426,6 +519,11 @@ Private Sub SetAutoSubtotal(pf As PivotField, wanted As Boolean)
             pf.Subtotals(i) = False
         Next i
     End If
+    If Err.Number <> 0 Then
+        Note "subtotals on " & pf.Name, Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Sub
 
 
@@ -540,6 +638,8 @@ End Function
 '==============================================================================
 
 Private Sub ApplyFormatting(pt As PivotTable)
+    gStep = "formatting the pivot cells"
+
     Dim ws As Worksheet
     Dim tr As Range, body As Range
     Dim headerRows As Long, labelCols As Long, buttonCols As Long
@@ -658,6 +758,8 @@ End Function
 '==============================================================================
 
 Private Sub ApplyChrome(ws As Worksheet, pt As PivotTable)
+    gStep = "setting column widths, freeze panes and zoom"
+
     Dim tr As Range, body As Range
     Dim labelCols As Long, firstCol As Long, lastCol As Long
 
@@ -705,13 +807,19 @@ Private Sub MoveToOrigin(pt As PivotTable)
     Dim ws As Worksheet
     Dim above As Long
 
+    On Error Resume Next
     Set ws = pt.Parent
     above = pt.TableRange2.Row - 1
-    If above < 1 Then Exit Sub
-
-    If Application.CountA(ws.Rows("1:" & above)) > 0 Then Exit Sub
-
-    ws.Rows("1:" & above).Delete
+    If above >= 1 Then
+        If Application.CountA(ws.Rows("1:" & above)) = 0 Then
+            ws.Rows("1:" & above).Delete
+        End If
+    End If
+    If Err.Number <> 0 Then
+        Note "moving the pivot to A1", Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Sub
 
 

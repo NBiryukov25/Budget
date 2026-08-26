@@ -114,6 +114,30 @@ In the 8-6-26 file, Region was a `VLOOKUP` from the SAP number into a
 SAP-number-to-region table on a hidden tab. A file without that table has
 nothing to fill Region from, so it has to be supplied before the pivot can match.
 
+## If it reports an error
+
+Since v3 the error box names the step it got to and the Excel error number, for
+example:
+
+> Step: applying the pivot total options
+> Error 438: Object doesn't support this property or method
+
+That is enough to say which line to look at. Send the whole message on and it
+can be fixed directly.
+
+Separately, the cosmetic settings — layout, totals, captions, table style,
+sorting, subtotals, moving the pivot to A1 — are now each applied on their own
+through `OptSet` / `OptCall`. Excel builds differ in which of these they expose,
+and error 438 means one of them isn't available in a given build. Rather than
+losing the whole run to one property, anything that won't take is collected and
+listed in a single message at the end:
+
+> The pivot was rebuilt and formatted, but this copy of Excel would not accept
+> these settings: ColumnHeaderCaption — Object doesn't support this property
+> or method
+
+The pivot is still built and formatted; only the named setting is missing.
+
 ## Notes
 
 - The macro sets `HasAutoFormat = False` on the pivot, so a plain
