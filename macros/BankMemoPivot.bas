@@ -79,6 +79,11 @@ Private Const ROW2_HEIGHT      As Double = 20.1
 Private Const ROW3_HEIGHT      As Double = 13.5
 Private Const SHEET_ZOOM       As Long = 90
 
+' ---- Version ----------------------------------------------------------------
+' Stamped into every message this module shows, so there is never any doubt
+' about which copy of the code a workbook is actually running.
+Private Const MACRO_VERSION    As String = "v4"
+
 ' ---- Run state ---------------------------------------------------------------
 ' gStep names the phase in progress so a failure can say where it happened.
 ' gSkipped collects settings this Excel would not accept, which are reported
@@ -100,7 +105,7 @@ Public Sub RefreshSummaryPivot()
     BeginRun
 
     gStep = "finding the Summary sheet and its pivot"
-    Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
+    Set ws = SummarySheet()
     Set pt = FindPivot(ws)
 
     If pt Is Nothing Then
@@ -127,7 +132,7 @@ Failed:
     MsgBox "Could not refresh the summary pivot." & vbCrLf & vbCrLf & _
            "Step: " & gStep & vbCrLf & _
            "Error " & Err.Number & ": " & Err.Description, _
-           vbExclamation, "Bank Memo Pivot"
+           vbExclamation, "Bank Memo Pivot " & MACRO_VERSION
 End Sub
 
 
@@ -139,7 +144,7 @@ Public Sub FormatSummaryPivot()
     Application.ScreenUpdating = False
     BeginRun
 
-    Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
+    Set ws = SummarySheet()
     Set pt = FindPivot(ws)
 
     If pt Is Nothing Then
@@ -164,7 +169,7 @@ Failed:
     MsgBox "Could not format the summary pivot." & vbCrLf & vbCrLf & _
            "Step: " & gStep & vbCrLf & _
            "Error " & Err.Number & ": " & Err.Description, _
-           vbExclamation, "Bank Memo Pivot"
+           vbExclamation, "Bank Memo Pivot " & MACRO_VERSION
 End Sub
 
 
@@ -181,7 +186,7 @@ Public Sub RebuildSummaryPivot()
     Application.ScreenUpdating = False
     BeginRun
 
-    Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
+    Set ws = SummarySheet()
     ws.Cells.Clear
 
     Set pt = CreatePivot(ws)
@@ -201,7 +206,7 @@ Failed:
     MsgBox "Could not rebuild the summary pivot." & vbCrLf & vbCrLf & _
            "Step: " & gStep & vbCrLf & _
            "Error " & Err.Number & ": " & Err.Description, _
-           vbExclamation, "Bank Memo Pivot"
+           vbExclamation, "Bank Memo Pivot " & MACRO_VERSION
 End Sub
 
 
@@ -325,6 +330,22 @@ Private Function PF(pt As PivotTable, wanted As String) As PivotField
 End Function
 
 
+' "Subscript out of range" from a bare Worksheets("Summary") says nothing about
+' what is missing, so the tab is looked up here and named in the failure.
+Private Function SummarySheet() As Worksheet
+    On Error Resume Next
+    Set SummarySheet = ThisWorkbook.Worksheets(SUMMARY_SHEET)
+    On Error GoTo 0
+
+    If SummarySheet Is Nothing Then
+        Err.Raise vbObjectError + 6, , _
+            "This workbook has no tab called '" & SUMMARY_SHEET & "'. " & _
+            "Rename the tab the pivot belongs on to " & SUMMARY_SHEET & _
+            ", or change SUMMARY_SHEET at the top of the module."
+    End If
+End Function
+
+
 Private Function FindPivot(ws As Worksheet) As PivotTable
     On Error Resume Next
     Set FindPivot = ws.PivotTables(PIVOT_NAME)
@@ -349,7 +370,40 @@ Private Function CreatePivot(ws As Worksheet) As PivotTable
     Set CreatePivot = ThisWorkbook.PivotCaches.Create( _
             SourceType:=xlDatabase, SourceData:=DataSourceRange()) _
         .CreatePivotTable(TableDestination:=ws.Range("A1"), _
-                          TableName:=PIVOT_NAME)
+                          TableName:=FreePivotName())
+End Function
+
+
+' Pivot table names are workbook-wide. If PIVOT_NAME is already taken by a
+' pivot on another sheet, creating a second one under that name fails, so a
+' free variant is found instead.
+Private Function FreePivotName() As String
+    Dim candidate As String
+    Dim n As Long
+
+    candidate = PIVOT_NAME
+    Do While PivotNameTaken(candidate)
+        n = n + 1
+        candidate = PIVOT_NAME & "_" & n
+        If n > 100 Then Exit Do
+    Loop
+
+    FreePivotName = candidate
+End Function
+
+
+Private Function PivotNameTaken(candidate As String) As Boolean
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each pt In ws.PivotTables
+            If StrComp(pt.Name, candidate, vbTextCompare) = 0 Then
+                PivotNameTaken = True
+                Exit Function
+            End If
+        Next pt
+    Next ws
 End Function
 
 
@@ -849,3 +903,97 @@ Private Sub WarnIfRegionEmpty()
            "Fill that column in, then run this macro again.", _
            vbInformation, "Bank Memo Pivot"
 End Sub
+
+
+'==============================================================================
+' Diagnostics
+'==============================================================================
+
+' Reports what this module can and cannot see, without changing anything.
+' Run this first whenever something is not behaving: it settles which version
+' of the code the workbook is running and what it resolves each name to.
+Public Sub CheckSetup()
+    Dim report As String
+    Dim ws As Worksheet, src As Worksheet, pt As PivotTable
+    Dim regionCol As Long, sapCol As Long, lastRow As Long, filled As Long
+
+    report = "Module version: " & MACRO_VERSION & vbCrLf & _
+             "Excel version: " & Application.Version & vbCrLf & _
+             "Workbook: " & ThisWorkbook.Name & vbCrLf & vbCrLf
+
+    ' --- tabs ----------------------------------------------------------------
+    report = report & "Tabs in this workbook:" & vbCrLf
+    For Each ws In ThisWorkbook.Worksheets
+        report = report & "    " & ws.Name
+        If ws.Visible <> xlSheetVisible Then report = report & "  (hidden)"
+        report = report & vbCrLf
+    Next ws
+    report = report & vbCrLf
+
+    ' --- summary sheet and pivot ---------------------------------------------
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(SUMMARY_SHEET)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        report = report & "Summary tab '" & SUMMARY_SHEET & "': NOT FOUND" & vbCrLf
+    Else
+        report = report & "Summary tab: " & ws.Name & vbCrLf
+        If ws.PivotTables.Count = 0 Then
+            report = report & "    pivot tables: none - run RebuildSummaryPivot" & vbCrLf
+        Else
+            For Each pt In ws.PivotTables
+                report = report & "    pivot: " & pt.Name & " at " & _
+                         pt.TableRange2.Address(False, False) & vbCrLf
+            Next pt
+        End If
+    End If
+    report = report & vbCrLf
+
+    ' --- source sheet ---------------------------------------------------------
+    On Error Resume Next
+    Set src = ResolveDataSheet()
+    On Error GoTo 0
+
+    If src Is Nothing Then
+        report = report & "Source sheet: NOT FOUND" & vbCrLf & _
+                 "    No tab has all four headings in row 1." & vbCrLf
+    Else
+        sapCol = HeaderColumn(src, FLD_SAP)
+        lastRow = src.Cells(src.Rows.Count, sapCol).End(xlUp).Row
+        report = report & "Source sheet: " & src.Name & _
+                 "  (rows 2 to " & lastRow & ")" & vbCrLf
+        report = report & "    " & FLD_SAP & " -> column " & sapCol & _
+                 " headed """ & src.Cells(1, sapCol).Value & """" & vbCrLf
+        report = report & ColumnLine(src, FLD_REGION)
+        report = report & ColumnLine(src, FLD_CUSTOMER)
+        report = report & ColumnLine(src, FLD_DATE)
+
+        regionCol = HeaderColumn(src, FLD_REGION)
+        If regionCol > 0 And lastRow > 1 Then
+            filled = Application.CountA(src.Range(src.Cells(2, regionCol), _
+                                                  src.Cells(lastRow, regionCol)))
+            report = report & vbCrLf & FLD_REGION & " values filled in: " & _
+                     filled & " of " & (lastRow - 1) & vbCrLf
+            If filled = 0 Then
+                report = report & "    Every customer will group under " & _
+                         """(blank)"" until this column is filled." & vbCrLf
+            End If
+        End If
+    End If
+
+    MsgBox report, vbInformation, "Bank Memo Pivot " & MACRO_VERSION & " - setup"
+End Sub
+
+
+Private Function ColumnLine(ws As Worksheet, wanted As String) As String
+    Dim c As Long
+
+    c = HeaderColumn(ws, wanted)
+    If c = 0 Then
+        ColumnLine = "    " & wanted & " -> NOT FOUND" & vbCrLf
+    Else
+        ColumnLine = "    " & wanted & " -> column " & c & _
+                     " headed """ & ws.Cells(1, c).Value & """" & vbCrLf
+    End If
+End Function

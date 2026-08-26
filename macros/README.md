@@ -44,6 +44,7 @@ If the Developer tab isn't showing: **File > Options > Customize Ribbon**, tick
 | `RefreshSummaryPivot` | The normal monthly run, after new rows have been added to the source sheet. Re-points the pivot at the current extent of that sheet, refreshes it, and re-applies the whole design. |
 | `FormatSummaryPivot` | Design only, no refresh. Use when someone has hand-edited the sheet and you just want the look back. |
 | `RebuildSummaryPivot` | Clears the Summary sheet and builds the pivot from scratch. Use if the pivot got deleted or its fields got scrambled. Asks for confirmation first. |
+| `CheckSetup` | Changes nothing. Reports the module version, the tabs it can see, which pivot it found, which tab and columns it resolves each field to, and how many Region values are filled in. Run this first when something misbehaves. |
 
 The normal workflow each period is: paste the period's rows onto the source
 sheet, then run `RefreshSummaryPivot`.
@@ -114,11 +115,27 @@ In the 8-6-26 file, Region was a `VLOOKUP` from the SAP number into a
 SAP-number-to-region table on a hidden tab. A file without that table has
 nothing to fill Region from, so it has to be supplied before the pivot can match.
 
+## Check which version is loaded
+
+Every message the module shows is stamped with its version — the title bar of
+an error box reads `Bank Memo Pivot v4`. A message with **no version in the
+title and no `Step:` line** is an older copy of the module still sitting in the
+workbook.
+
+That happens easily: each download of `BankMemoPivot.bas` lands in Downloads
+alongside the last one as `BankMemoPivot (1).bas`, `BankMemoPivot (2).bas`, and
+it's the original filename that gets picked in the import dialog. Check the
+date on the file you're importing, and remove the old module first (see
+*Replacing an older copy* above).
+
+`CheckSetup` prints the version along with everything else it can see.
+
 ## If it reports an error
 
-Since v3 the error box names the step it got to and the Excel error number, for
+The error box names the step it got to and the Excel error number, for
 example:
 
+> **Bank Memo Pivot v4**
 > Step: applying the pivot total options
 > Error 438: Object doesn't support this property or method
 
