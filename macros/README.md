@@ -4,7 +4,8 @@ A macro that rebuilds the **Summary** pivot table in the bank memo /
 returned payment report and re-applies the report's design, so you can run it
 each period and get an identical-looking sheet over new data.
 
-Written against `bankmemo_distr_20260806_report.xlsx`.
+Written against `bankmemo_distr_20260806_report.xlsx` and checked against
+`bankmemo_distr_20260820_report.xlsm`.
 
 ## Installing it
 
@@ -22,6 +23,12 @@ saved as `.xlsm`.
 If you'd rather not import a file: Alt+F11, then **Insert > Module**, and paste
 the contents of `BankMemoPivot.bas` into the blank module.
 
+**Replacing an older copy:** importing a second time creates a duplicate module
+called `BankMemoPivot1` and the old code keeps running. Right-click the existing
+`BankMemoPivot` module in the Project pane, choose **Remove BankMemoPivot**,
+answer **No** when it offers to export, then import the new file. Or just open
+the existing module, select all, and paste the new code over it.
+
 To put it on a button, go to **Developer > Insert > Button (Form Control)**,
 draw it on the Summary sheet, and assign `RefreshSummaryPivot`.
 
@@ -34,18 +41,18 @@ If the Developer tab isn't showing: **File > Options > Customize Ribbon**, tick
 
 | Macro | When to use it |
 | --- | --- |
-| `RefreshSummaryPivot` | The normal monthly run, after new rows have been added to the **Data** sheet. Re-points the pivot at the current extent of Data, refreshes it, and re-applies the whole design. |
+| `RefreshSummaryPivot` | The normal monthly run, after new rows have been added to the source sheet. Re-points the pivot at the current extent of that sheet, refreshes it, and re-applies the whole design. |
 | `FormatSummaryPivot` | Design only, no refresh. Use when someone has hand-edited the sheet and you just want the look back. |
 | `RebuildSummaryPivot` | Clears the Summary sheet and builds the pivot from scratch. Use if the pivot got deleted or its fields got scrambled. Asks for confirmation first. |
 
-The normal workflow each period is: paste the period's rows onto the **Data**
+The normal workflow each period is: paste the period's rows onto the source
 sheet, then run `RefreshSummaryPivot`.
 
 ## What it produces
 
 | | |
 | --- | --- |
-| Source | `Data!A1:N<last row>`, measured on every run, so the range grows with the data |
+| Source | The tab whose row 1 has SAP / Region / Customer / Date headings, measured on every run so the range grows with the data |
 | Rows | Region › Customer › SAP No., tabular layout, labels repeated down, subtotals at the bottom of each group |
 | Columns | Date grouped Years › Quarters › Months |
 | Values | Count of SAP No., captioned "Bank Memo Count, Returned Payment Count" |
@@ -71,15 +78,41 @@ of the module.
 
 Everything adjustable is a `Private Const` in the first fifty lines:
 
-- `DATA_SHEET`, `SUMMARY_SHEET`, `PIVOT_NAME` — rename these if the tabs are
-  ever renamed.
-- `FLD_SAP`, `FLD_REGION`, `FLD_CUSTOMER`, `FLD_DATE` — must match the header
-  row on the Data sheet.
+- `DATA_SHEET`, `SUMMARY_SHEET`, `PIVOT_NAME` — `DATA_SHEET` is only the first
+  place the macro looks; see *Finding the source sheet* below.
+- `FLD_SAP`, `FLD_REGION`, `FLD_CUSTOMER`, `FLD_DATE` — matched loosely against
+  the header row, ignoring case, spaces and punctuation.
 - `DATA_CAPTION`, `GRAND_TOTAL_CAP`, `COL_HEADER_CAP` — the captions.
 - `PIVOT_STYLE`, `BODY_FONT`, `BODY_SIZE`, `BAND_COLOR`, `BAND_QUARTERS` — the
   look.
 - `VALUE_COL_WIDTH`, `ROW1_HEIGHT`, `ROW2_HEIGHT`, `ROW3_HEIGHT`, `SHEET_ZOOM` —
   the measurements.
+
+## Finding the source sheet and columns
+
+The source tab is called `Data` in the 8-6-26 file and `Sheet1` in the 8-20-26
+file, and the SAP column is headed `SAP No.` in one and `SAP No` in the other.
+Rather than needing to be re-pointed each month, the macro:
+
+- looks for a tab named `DATA_SHEET` first, and if that tab doesn't exist or
+  doesn't have the right headers, searches every other tab (except Summary) for
+  a row 1 containing SAP, Region, Customer and Date headings;
+- matches column and field names with case, spaces and punctuation stripped, so
+  `SAP No.` and `SAP No` are the same column.
+
+It also nudges the pivot up to cell A1 if it was built lower down, as long as
+the rows above it are empty.
+
+## If the Region column is blank
+
+The pivot groups Region › Customer › SAP No. If the Region column has no values,
+every customer lands under a single `(blank)` heading and the report comes out
+structurally unlike the 8-6-26 one however good the formatting is. The macro
+says so at the end of a run when it sees this.
+
+In the 8-6-26 file, Region was a `VLOOKUP` from the SAP number into a
+SAP-number-to-region table on a hidden tab. A file without that table has
+nothing to fill Region from, so it has to be supplied before the pivot can match.
 
 ## Notes
 
@@ -97,5 +130,5 @@ Everything adjustable is a `Private Const` in the first fifty lines:
   writes as `Qtr1`, `Qtr1 Total`. On a non-English Excel, change
   `QUARTER_PREFIX`.
 - If grouping fails, the usual cause is text that looks like a date sitting in
-  the Data sheet's Date column. Select the column and use
+  the source sheet's Date column. Select the column and use
   **Data > Text to Columns > Finish** to coerce it, then run the macro again.

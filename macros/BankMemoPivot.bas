@@ -40,11 +40,15 @@ Option Explicit
 
 
 ' ---- Sheet, object and field names -----------------------------------------
-' Change these if the tabs or the Data header row are ever renamed.
+' DATA_SHEET is only the first place to look. If no sheet by that name has the
+' right header row, every other sheet is searched, so the source tab can be
+' called "Data" in one month's file and "Sheet1" in the next.
 Private Const DATA_SHEET       As String = "Data"
 Private Const SUMMARY_SHEET    As String = "Summary"
 Private Const PIVOT_NAME       As String = "PivotTable1"
 
+' Field names are matched loosely: case, spaces and punctuation are ignored, so
+' "SAP No." and "SAP No" both resolve to the same column.
 Private Const FLD_SAP          As String = "SAP No."
 Private Const FLD_REGION       As String = "Region"
 Private Const FLD_CUSTOMER     As String = "Customer"
@@ -97,10 +101,12 @@ Public Sub RefreshSummaryPivot()
     End If
 
     ApplyLayout pt
+    MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    WarnIfRegionEmpty
     Exit Sub
 
 Failed:
@@ -127,10 +133,12 @@ Public Sub FormatSummaryPivot()
     End If
 
     ApplyLayout pt
+    MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    WarnIfRegionEmpty
     Exit Sub
 
 Failed:
@@ -145,7 +153,7 @@ Public Sub RebuildSummaryPivot()
     Dim pt As PivotTable
 
     If MsgBox("This clears the " & SUMMARY_SHEET & " sheet and builds the " & _
-              "pivot table again from the " & DATA_SHEET & " sheet." & _
+              "pivot table again from the source sheet." & _
               vbCrLf & vbCrLf & "Continue?", _
               vbOKCancel + vbQuestion, "Bank Memo Pivot") <> vbOK Then Exit Sub
 
@@ -157,10 +165,12 @@ Public Sub RebuildSummaryPivot()
 
     Set pt = CreatePivot(ws)
     ApplyLayout pt
+    MoveToOrigin pt
     ApplyFormatting pt
     ApplyChrome ws, pt
 
     Application.ScreenUpdating = True
+    WarnIfRegionEmpty
     Exit Sub
 
 Failed:
@@ -174,22 +184,119 @@ End Sub
 ' Source data and pivot creation
 '==============================================================================
 
-' The Data sheet grows every month, so the source range is measured rather than
-' remembered. Column A (SAP No.) is populated on every real row.
+' The source sheet grows every month, so its extent is measured rather than
+' remembered. The SAP column is populated on every real row, so it is the one
+' that decides where the data ends.
 Private Function DataSourceRange() As Range
     Dim ws As Worksheet
-    Dim lastRow As Long, lastCol As Long
+    Dim lastRow As Long, lastCol As Long, keyCol As Long
 
-    Set ws = ThisWorkbook.Worksheets(DATA_SHEET)
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Set ws = ResolveDataSheet()
+    keyCol = HeaderColumn(ws, FLD_SAP)
+    lastRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).Row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
 
     If lastRow < 2 Then
         Err.Raise vbObjectError + 2, , _
-            "The " & DATA_SHEET & " sheet has a header row but no data rows."
+            "The " & ws.Name & " sheet has a header row but no data rows."
     End If
 
     Set DataSourceRange = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, lastCol))
+End Function
+
+
+' The source tab is called "Data" in one month's file and "Sheet1" in another,
+' so it is identified by its header row rather than by its name.
+Private Function ResolveDataSheet() As Worksheet
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    Set ResolveDataSheet = ThisWorkbook.Worksheets(DATA_SHEET)
+    On Error GoTo 0
+
+    If Not ResolveDataSheet Is Nothing Then
+        If SheetHasHeaders(ResolveDataSheet) Then Exit Function
+        Set ResolveDataSheet = Nothing
+    End If
+
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Name <> SUMMARY_SHEET Then
+            If SheetHasHeaders(ws) Then
+                Set ResolveDataSheet = ws
+                Exit Function
+            End If
+        End If
+    Next ws
+
+    Err.Raise vbObjectError + 5, , _
+        "Could not find the source sheet. One tab needs a header row in " & _
+        "row 1 with columns called " & FLD_SAP & ", " & FLD_REGION & ", " & _
+        FLD_CUSTOMER & " and " & FLD_DATE & "."
+End Function
+
+
+Private Function SheetHasHeaders(ws As Worksheet) As Boolean
+    SheetHasHeaders = HeaderColumn(ws, FLD_SAP) > 0 _
+                 And HeaderColumn(ws, FLD_REGION) > 0 _
+                 And HeaderColumn(ws, FLD_CUSTOMER) > 0 _
+                 And HeaderColumn(ws, FLD_DATE) > 0
+End Function
+
+
+Private Function HeaderColumn(ws As Worksheet, wanted As String) As Long
+    Dim lastCol As Long, c As Long, target As String
+
+    target = Canon(wanted)
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    If lastCol > 256 Then lastCol = 256
+
+    For c = 1 To lastCol
+        If Canon(CStr(ws.Cells(1, c).Value)) = target Then
+            HeaderColumn = c
+            Exit Function
+        End If
+    Next c
+End Function
+
+
+' Strips everything but letters and digits and lower-cases the rest, so
+' "SAP No." and "SAP No" compare equal.
+Private Function Canon(text As String) As String
+    Dim i As Long, ch As String, out As String
+
+    For i = 1 To Len(text)
+        ch = LCase$(Mid$(text, i, 1))
+        If (ch >= "0" And ch <= "9") Or (ch >= "a" And ch <= "z") Then
+            out = out & ch
+        End If
+    Next i
+
+    Canon = out
+End Function
+
+
+' Finds a pivot field by loose name match, so a header row that says "SAP No"
+' rather than "SAP No." still resolves.
+Private Function PF(pt As PivotTable, wanted As String) As PivotField
+    Dim pf2 As PivotField
+    Dim target As String
+
+    On Error Resume Next
+    Set PF = pt.PivotFields(wanted)
+    On Error GoTo 0
+    If Not PF Is Nothing Then Exit Function
+
+    target = Canon(wanted)
+    For Each pf2 In pt.PivotFields
+        If Canon(pf2.Name) = target Then
+            Set PF = pf2
+            Exit Function
+        End If
+    Next pf2
+
+    Err.Raise vbObjectError + 4, , _
+        "The pivot has no field matching '" & wanted & "'. The source " & _
+        "sheet needs a column with that heading."
 End Function
 
 
@@ -227,17 +334,17 @@ End Function
 
 Private Sub ApplyLayout(pt As PivotTable)
     ' Rows: Region > Customer > SAP No.
-    PlaceField pt, FLD_REGION, xlRowField, 1
-    PlaceField pt, FLD_CUSTOMER, xlRowField, 2
-    PlaceField pt, FLD_SAP, xlRowField, 3
+    PlaceField PF(pt, FLD_REGION), xlRowField, 1
+    PlaceField PF(pt, FLD_CUSTOMER), xlRowField, 2
+    PlaceField PF(pt, FLD_SAP), xlRowField, 3
 
     ' Region and Customer each get a subtotal row; the innermost field does not.
-    SetAutoSubtotal pt.PivotFields(FLD_REGION), True
-    SetAutoSubtotal pt.PivotFields(FLD_CUSTOMER), True
-    SetAutoSubtotal pt.PivotFields(FLD_SAP), False
+    SetAutoSubtotal PF(pt, FLD_REGION), True
+    SetAutoSubtotal PF(pt, FLD_CUSTOMER), True
+    SetAutoSubtotal PF(pt, FLD_SAP), False
 
-    pt.PivotFields(FLD_REGION).AutoSort xlAscending, FLD_REGION
-    pt.PivotFields(FLD_CUSTOMER).AutoSort xlAscending, FLD_CUSTOMER
+    PF(pt, FLD_REGION).AutoSort xlAscending, PF(pt, FLD_REGION).Name
+    PF(pt, FLD_CUSTOMER).AutoSort xlAscending, PF(pt, FLD_CUSTOMER).Name
 
     ' Columns: Date grouped into Years > Quarters > Months
     EnsureDateGrouping pt
@@ -279,7 +386,7 @@ Private Sub SetValueField(pt As PivotTable)
     Dim df As PivotField
 
     For i = pt.DataFields.Count To 1 Step -1
-        If pt.DataFields(i).SourceName = FLD_SAP Then
+        If Canon(pt.DataFields(i).SourceName) = Canon(FLD_SAP) Then
             Set df = pt.DataFields(i)
         Else
             pt.DataFields(i).Orientation = xlHidden
@@ -287,7 +394,7 @@ Private Sub SetValueField(pt As PivotTable)
     Next i
 
     If df Is Nothing Then
-        Set df = pt.AddDataField(pt.PivotFields(FLD_SAP), DATA_CAPTION, xlCount)
+        Set df = pt.AddDataField(PF(pt, FLD_SAP), DATA_CAPTION, xlCount)
     End If
 
     With df
@@ -298,9 +405,9 @@ Private Sub SetValueField(pt As PivotTable)
 End Sub
 
 
-Private Sub PlaceField(pt As PivotTable, fieldName As String, _
-                       axis As XlPivotFieldOrientation, slot As Long)
-    With pt.PivotFields(fieldName)
+Private Sub PlaceField(pf As PivotField, axis As XlPivotFieldOrientation, _
+                       slot As Long)
+    With pf
         If .Orientation <> axis Then .Orientation = axis
         .Position = slot
     End With
@@ -353,12 +460,12 @@ Private Sub EnsureDateGrouping(pt As PivotTable)
 
     ' Where Excel kept a separate ungrouped Date field, it stays off the pivot.
     On Error Resume Next
-    pt.PivotFields(FLD_DATE).Orientation = xlHidden
+    PF(pt, FLD_DATE).Orientation = xlHidden
     On Error GoTo 0
 
-    PlaceField pt, pfYears.Name, xlColumnField, 1
-    PlaceField pt, pfQuarters.Name, xlColumnField, 2
-    PlaceField pt, pfMonths.Name, xlColumnField, 3
+    PlaceField pfYears, xlColumnField, 1
+    PlaceField pfQuarters, xlColumnField, 2
+    PlaceField pfMonths, xlColumnField, 3
 
     ' Quarter subtotals are the "Qtr n Total" columns and year subtotals the
     ' "<year> Total" column. Months, being innermost, get none.
@@ -371,7 +478,7 @@ End Sub
 Private Sub GroupDateField(pt As PivotTable)
     Dim pf As PivotField
 
-    Set pf = pt.PivotFields(FLD_DATE)
+    Set pf = PF(pt, FLD_DATE)
     pf.Orientation = xlColumnField
     pf.Position = 1
 
@@ -407,7 +514,7 @@ End Function
 ' The field carrying the dates, whatever grouping has done to its name.
 Private Function DateAxisField(pt As PivotTable) As PivotField
     On Error Resume Next
-    Set DateAxisField = pt.PivotFields(FLD_DATE)
+    Set DateAxisField = PF(pt, FLD_DATE)
     On Error GoTo 0
 
     If DateAxisField Is Nothing Then Set DateAxisField = FieldStartingWith(pt, "Months")
@@ -584,4 +691,53 @@ Private Sub ApplyChrome(ws As Worksheet, pt As PivotTable)
     End With
 
     ws.Cells(body.Row, body.Column).Select
+End Sub
+
+
+'==============================================================================
+' Housekeeping
+'==============================================================================
+
+' The 8-6-26 report has the pivot in the top-left corner. A pivot that was
+' built further down is nudged up by deleting the empty rows above it, but only
+' when there is nothing up there worth keeping.
+Private Sub MoveToOrigin(pt As PivotTable)
+    Dim ws As Worksheet
+    Dim above As Long
+
+    Set ws = pt.Parent
+    above = pt.TableRange2.Row - 1
+    If above < 1 Then Exit Sub
+
+    If Application.CountA(ws.Rows("1:" & above)) > 0 Then Exit Sub
+
+    ws.Rows("1:" & above).Delete
+End Sub
+
+
+' A blank Region column collapses every customer into a single "(blank)" group,
+' so the pivot comes out structurally unlike the report however good the
+' formatting is. Worth saying out loud rather than leaving to be spotted.
+Private Sub WarnIfRegionEmpty()
+    Dim ws As Worksheet
+    Dim regionCol As Long, lastRow As Long
+
+    On Error Resume Next
+    Set ws = ResolveDataSheet()
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+
+    regionCol = HeaderColumn(ws, FLD_REGION)
+    lastRow = ws.Cells(ws.Rows.Count, HeaderColumn(ws, FLD_SAP)).End(xlUp).Row
+    If regionCol = 0 Or lastRow < 2 Then Exit Sub
+
+    If Application.CountA(ws.Range(ws.Cells(2, regionCol), _
+                                   ws.Cells(lastRow, regionCol))) > 0 Then Exit Sub
+
+    MsgBox "The pivot is formatted, but the " & FLD_REGION & " column on the " & _
+           ws.Name & " sheet is empty, so every customer lands under one " & _
+           "'(blank)' heading instead of being grouped by region." & _
+           vbCrLf & vbCrLf & _
+           "Fill that column in, then run this macro again.", _
+           vbInformation, "Bank Memo Pivot"
 End Sub
