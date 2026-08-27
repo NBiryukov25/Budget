@@ -30,14 +30,27 @@ What it does, in order:
   5. Skips anything already in the sheet, so re-running over an overlapping export
      does not double-post.
 
+Run it from the folder holding the workbook and the downloaded statement and
+it will find both:
+
+    python3 import_transactions.py                       # see what it would do
+    python3 import_transactions.py --dry-run             # ...without writing
+
+or name them yourself:
+
     python3 import_transactions.py <book.xlsx> <export.csv> [--out FILE]
                                    [--cash-account "Cash on Hand"] [--dry-run]
+
+Writing happens in place, over the workbook it read. The copy it replaces is
+kept in a backups/ folder alongside.
 """
 
 import argparse
 import csv
 import datetime as dt
+import pathlib
 import re
+import shutil
 from collections import defaultdict
 
 from openpyxl import load_workbook
@@ -135,12 +148,47 @@ def read_csv(path):
     return out, closing
 
 
+BOOK = "Weekly_Cash_Flow_Survival.xlsx"
+
+
+def find_inputs(book, csv_path):
+    """Fall back to whatever is sitting in this folder.
+
+    Typing two paths correctly is the step most likely to go wrong, so with no
+    arguments take the workbook by its known name and the most recent CSV
+    next to it - which is what a fresh download from the bank will be.
+    """
+    here = pathlib.Path.cwd()
+    if not book:
+        if not (here / BOOK).exists():
+            raise SystemExit(f"no {BOOK} in this folder - put it here, or name it on the command line")
+        book = str(here / BOOK)
+    if not csv_path:
+        found = sorted(here.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not found:
+            raise SystemExit("no .csv in this folder - download your statement here first")
+        csv_path = str(found[0])
+        print(f"using the newest CSV here: {found[0].name}")
+    return book, csv_path
+
+
+def back_up(book):
+    """Keep the previous copy. This writes over real financial data in place."""
+    src = pathlib.Path(book)
+    keep = src.parent / "backups"
+    keep.mkdir(exist_ok=True)
+    dest = keep / f"{src.stem}-{dt.datetime.now():%Y%m%d-%H%M}{src.suffix}"
+    shutil.copy(src, dest)
+    return dest
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("book"); ap.add_argument("csv_path")
+    ap.add_argument("book", nargs="?"); ap.add_argument("csv_path", nargs="?")
     ap.add_argument("--out"); ap.add_argument("--cash-account", default="Cash on Hand")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+    a.book, a.csv_path = find_inputs(a.book, a.csv_path)
 
     wb = load_workbook(a.book)
     vals = load_workbook(a.book, data_only=True)
@@ -321,6 +369,8 @@ def main():
         cf[f"E{i['row']}"] = i["amount"]
 
     out = a.out or a.book
+    if out == a.book:
+        print(f"previous copy kept at {back_up(a.book)}")
     wb.save(out)
     print(f"\nwrote {out}")
 
