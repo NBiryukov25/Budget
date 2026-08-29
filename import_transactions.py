@@ -222,6 +222,15 @@ def main():
                 if d:
                     near.append((norm(nm), d, amt))   # same shop, date a day or two off
 
+    if not any(cfv[f"B{r}"].value
+               for w in range(1, N_WEEKS + 1)
+               for r in range(block(w, var_rows)["first_slot"],
+                              block(w, var_rows)["last_slot"] + 1)):
+        raise SystemExit(
+            "this workbook holds no calculated values, so no bill could be matched and "
+            "every payment would be added a second time.\n"
+            "Open it in Excel, let it calculate, save, and run this again.")
+
     # scheduled recurring occurrences, so a posting can be matched to its bill
     sched = []
     for w in range(1, N_WEEKS + 1):
@@ -296,6 +305,15 @@ def main():
                and (k.startswith(nk) or nk.startswith(k))
                for nk, dd, amt in near if nk and k):
             dupes.append((label, d, total)); continue
+        # The statement groups a day's swipes at one shop into a single line,
+        # but the sheet may already hold them typed in separately - two Circle K
+        # charges against one "Circle K (2 charges)". Comparing the group total
+        # to each row finds nothing, so compare it to the shop's whole day.
+        if len(ts) > 1 and k:
+            apart = sum(amt for nk, dd, amt in near
+                        if nk and (k.startswith(nk) or nk.startswith(k)) and dd == d)
+            if abs(apart - total) < CENTS:
+                dupes.append((label, d, total)); continue
         to_write.append({"date": d, "label": label, "amount": total,
                          "week": (d - start).days // 7 + 1, "n": len(ts)})
 

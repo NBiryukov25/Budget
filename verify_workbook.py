@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Item 20: prove the finished workbook behaves, rather than asserting it."""
-import datetime as dt, shutil, subprocess, sys
+import datetime as dt, pathlib, shutil, subprocess, sys, tempfile
 from openpyxl import load_workbook
 
-RECALC = "/root/.claude/skills/synced/xlsx/scripts/recalc.py"
 ERRS = ("#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NULL!", "#NUM!", "Err:")
 n = lambda v: v if isinstance(v, (int, float)) else 0
 SLOTS, FB, NW = 10, 13, 13
@@ -23,7 +22,22 @@ blk = lambda w: {"h": FB+(SLOTS+VR+5)*(w-1), "fs": FB+(SLOTS+VR+5)*(w-1)+2,
                  "tot": FB+(SLOTS+VR+5)*(w-1)+3+SLOTS+VR}
 
 def recalc(p):
-    subprocess.run([sys.executable, RECALC, p, "300"], capture_output=True)
+    """Recalculate in place with LibreOffice.
+
+    This used to shell out to a helper shipped with the xlsx skill. When that
+    path is not present the call failed silently, every test copy kept the
+    empty values openpyxl writes, and four checks reported zeroes as though the
+    workbook were broken. Drive the converter directly and fail loudly instead.
+    """
+    src = pathlib.Path(p).resolve()
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["soffice", "--headless", "--convert-to",
+                        "xlsx:Calc MS Excel 2007 XML", "--outdir", tmp, str(src)],
+                       capture_output=True, timeout=300)
+        made = pathlib.Path(tmp) / src.name
+        if not made.exists():
+            raise SystemExit(f"LibreOffice could not recalculate {src.name}")
+        shutil.move(str(made), str(src))
 
 def scan_errors(p):
     f, v = load_workbook(p), load_workbook(p, data_only=True)
